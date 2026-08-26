@@ -134,6 +134,20 @@ export const DATA_CREDITS = [
       '(per-camera attribution in the CCTV panel; ACCESS LIVE FEED opens the operator’s own page)',
   },
   {
+    key: 'noaa-buoycams',
+    html:
+      'Offshore BuoyCAMs: ' +
+      '<a href="https://www.ndbc.noaa.gov/buoycams.shtml" target="_blank" rel="noopener">NOAA National Data Buoy Center</a> ' +
+      '(U.S. government work, public domain)',
+  },
+  {
+    key: 'faa-weathercams',
+    html:
+      'Aviation weather cameras: ' +
+      '<a href="https://weathercams.faa.gov/" target="_blank" rel="noopener">FAA Weather Camera Program</a> ' +
+      '(U.S. government work, public domain)',
+  },
+  {
     key: 'gbfs',
     html: 'Bikeshare availability: GBFS operator feeds (e.g. Austin BCycle)',
   },

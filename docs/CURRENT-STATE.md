@@ -2,6 +2,23 @@
 
 Updated: August 26, 2026
 
+> **2026-08-26 — nationwide open-access camera packs (NOAA + FAA).**
+> `loadNoaaBuoycamSources()` (vite.config.js) fetches NDBC's published BuoyCAM
+> KML per catalog refresh (15s timeout, exported `parseBuoycamKml` — regex
+> Placemark parse requiring a station-shaped id AND finite coordinates) and
+> registers ~82 offshore cameras with direct public-domain
+> `buoycam.php?station=…` JPEGs and `station_page.php` as `pageUrl`;
+> `CCTV_NOAA_ENABLED=0` / `CCTV_NOAA_MAX_SOURCES` govern it.
+> `loadFaaWeathercamSources()` is opt-in (`CCTV_FAA_ENABLED=1`) and
+> experimental: exported `extractFaaWeathercamEntries` accepts bare-array,
+> wrapped-key, and GeoJSON-ish payload shapes, origin-pins image URLs to
+> weathercams.faa.gov, and yields zero rows (one warning) on anything else.
+> Both run in the live-pack `Promise.allSettled` and fail independently.
+> `DEFAULT_CCTV_MAX_SOURCES` is now 1200 (== the hard bound) so the full
+> built-in roster (250+300+250+70+~82, +FAA 200 opt-in) never truncates.
+> Tests: `cctvOpenAccessPacks.test.mjs` (fixture KML/JSON parses, malformed-row
+> rejection).
+
 > **2026-08-26 — bundled U.S. live-webcam pack + ACCESS LIVE FEED.**
 > `config/cctv_sources.us-live.json` (~70 publicly published webcams — Ocean
 > City MD, Corpus Christi TX, Maryland CHART, NASA ISS, and ~37 place-specific

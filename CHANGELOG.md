@@ -21,6 +21,15 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 - Bounded reconnects for live video: a media error (or stall without buffered
   runway) re-arms the stream on an exponential 2s→30s backoff, capped at 6
   attempts, then falls back to the placeholder + degraded health chip.
+- Nationwide open-access camera packs: a live **NOAA NDBC BuoyCAM** loader
+  (~82 offshore cameras from NDBC's published KML, direct public-domain
+  `buoycam.php` JPEGs, station page as the live-feed link; `CCTV_NOAA_ENABLED=0`
+  disables) and an **experimental, opt-in FAA WeatherCams** loader
+  (`CCTV_FAA_ENABLED=1`; schema-defensive, origin-pinned image URLs, degrades
+  to zero cameras with a console warning on any schema surprise). The default
+  catalog cap rises 900 → 1200 (the existing hard bound) so the full built-in
+  roster never truncates; the US live-webcam pack logs its load count like the
+  city packs.
 - A bundled U.S. live-webcam directory (`config/cctv_sources.us-live.json`,
   ~70 publicly published cameras: Ocean City MD, Corpus Christi TX, and
   place-specific marinas/lighthouses/main-street cams across ~25 states) loads

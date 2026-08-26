@@ -3444,8 +3444,11 @@ const DEFAULT_CCTV_SOURCE_FILE = 'config/cctv_sources.austin.json';
 const DEFAULT_AUSTIN_ROWS_URL = 'https://data.austintexas.gov/api/views/b4k4-adkb/rows.json?accessType=DOWNLOAD';
 /** Default cap on Austin cameras after distance-based prioritization. */
 const DEFAULT_AUSTIN_MAX_SOURCES = 250;
-/** Global cap on total CCTV sources served by the proxy. */
-const DEFAULT_CCTV_MAX_SOURCES = 900;
+/** Global cap on total CCTV sources served by the proxy. Sized for the full
+ * built-in roster (Austin 250 + Caltrans 300 + TfL 250 + US live-webcam 70 +
+ * NOAA BuoyCAM ~82, plus opt-in FAA headroom) — matches the 1200 hard bound
+ * and the health-map capacity, which were already sized for this. */
+const DEFAULT_CCTV_MAX_SOURCES = 1200;
 /** Reference point for Austin camera prioritization (Congress & 6th). */
 const AUSTIN_DOWNTOWN = { lat: 30.2672, lon: -97.7431 };
 /** Caltrans CCTV: one JSON feed per district, identical schema statewide. */
@@ -3551,9 +3554,229 @@ function loadUsLiveWebcamSources() {
   try {
     if (!fs.existsSync(resolved)) return [];
     const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
+    const entries = Array.isArray(parsed) ? parsed : [];
+    const cameras = entries.filter((item) => item && typeof item === 'object' && String(item.id || '').trim());
+    // Match the per-pack load logging of the live city packs so a missing
+    // pack (stale checkout, CCTV_SOURCES_FILE override) is diagnosable.
+    console.log(`[CCTV] Loaded US live-webcam pack: ${cameras.length} cameras`);
+    return cameras;
   } catch (error) {
     console.warn('[CCTV] failed to read US live-webcam pack:', error?.message || error);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// NOAA NDBC BuoyCAM live pack (nationwide offshore coverage, public domain)
+// ---------------------------------------------------------------------------
+/** NOAA's published KML of stations with BuoyCAMs (name + coordinates). The
+ * direct-image link format (buoycam.php?station=…) is documented in NDBC's
+ * own FAQ (ndbc.noaa.gov/faq/buoycamlinks.shtml). U.S. government work —
+ * public domain. */
+const NDBC_BUOYCAM_KML_URL = 'https://www.ndbc.noaa.gov/kml/buoycams_as_kml.php';
+const NDBC_ORIGIN = 'https://www.ndbc.noaa.gov/';
+const DEFAULT_NDBC_MAX_SOURCES = 100;
+
+/**
+ * Parse NDBC's BuoyCAM KML into {station, name, lat, lon} rows.
+ *
+ * Deliberately regex-based (no XML dependency) and defensive: a Placemark
+ * yields a row only when a plausible station id AND finite coordinates are
+ * both present; anything else is skipped silently. Exported for fixture
+ * tests.
+ *
+ * @param {string} kmlText - Raw KML document.
+ * @returns {Array<{station: string, name: string, lat: number, lon: number}>}
+ */
+export function parseBuoycamKml(kmlText) {
+  const rows = [];
+  const text = String(kmlText || '');
+  const placemarks = text.match(/<Placemark[\s\S]*?<\/Placemark>/gi) || [];
+  for (const block of placemarks) {
+    const nameMatch = /<name>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/name>/i.exec(block);
+    const coordMatch = /<coordinates>\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i.exec(block);
+    if (!coordMatch) continue;
+    const lon = Number(coordMatch[1]);
+    const lat = Number(coordMatch[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const name = String(nameMatch?.[1] || '').replace(/\s+/g, ' ').trim();
+    // Station id: prefer an explicit station=… link anywhere in the
+    // Placemark; fall back to a station-shaped token in the name. NDBC ids
+    // are 5 digits (buoys, e.g. 42001) or 4 letters + 1 digit (C-MAN, e.g.
+    // burl1) — an ordinary 5-letter word must never match.
+    const linkMatch = /station=([a-z0-9]{4,6})/i.exec(block);
+    const nameToken = /\b([0-9]{5}|[a-z]{4}[0-9])\b/i.exec(name);
+    const station = String(linkMatch?.[1] || nameToken?.[1] || '').toLowerCase();
+    if (!station) continue;
+    rows.push({ station, name: name || `Station ${station.toUpperCase()}`, lat, lon });
+  }
+  return rows;
+}
+
+/**
+ * Fetch the live NOAA BuoyCAM catalog: one camera per station, direct
+ * public-domain JPEG via buoycam.php, station page as the live-feed link.
+ *
+ * @returns {Promise<Array<object>>} Normalized-shape raw sources, [] on error.
+ */
+async function loadNoaaBuoycamSources() {
+  if (String(process.env.CCTV_NOAA_ENABLED || '1').trim() === '0') return [];
+  try {
+    const resp = await fetch(NDBC_BUOYCAM_KML_URL, {
+      headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
+      signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn('[CCTV] NOAA BuoyCAM KML download failed:', resp.status);
+      return [];
+    }
+    const rows = parseBuoycamKml(await resp.text());
+    const maxRaw = Number(process.env.CCTV_NOAA_MAX_SOURCES || DEFAULT_NDBC_MAX_SOURCES);
+    const maxCount = Number.isFinite(maxRaw) ? Math.max(8, Math.min(200, Math.floor(maxRaw))) : DEFAULT_NDBC_MAX_SOURCES;
+    const cameras = rows.slice(0, maxCount).map((row) => ({
+      id: `ndbc-${row.station}`,
+      name: `BuoyCAM ${row.station.toUpperCase()} — ${row.name}`,
+      city: 'Offshore',
+      cityId: 'ndbc-offshore',
+      provider: 'NOAA National Data Buoy Center',
+      lat: row.lat,
+      lon: row.lon,
+      headingConfidence: 'low',
+      pitchDeg: -4, // buoy cams sit near the waterline looking at the horizon
+      fovDeg: 110, // each image is a wide multi-panel horizon strip
+      rangeM: 500,
+      mountHeightM: 6,
+      groundElevationM: 0,
+      feedType: 'image',
+      url: `${NDBC_ORIGIN}buoycam.php?station=${encodeURIComponent(row.station)}`,
+      snapshotUrl: `${NDBC_ORIGIN}buoycam.php?station=${encodeURIComponent(row.station)}`,
+      pageUrl: `${NDBC_ORIGIN}station_page.php?station=${encodeURIComponent(row.station)}`,
+      sourceKind: 'noaa-buoycam',
+      license: 'NOAA NDBC BuoyCAM — U.S. government work, public domain. Images update every ~10 minutes in daylight.',
+    }));
+    console.log(`[CCTV] Loaded NOAA BuoyCAM sources: ${rows.length} stations (using ${cameras.length})`);
+    return cameras;
+  } catch (error) {
+    console.warn('[CCTV] NOAA BuoyCAM download error:', error?.message || error);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FAA WeatherCams live pack (EXPERIMENTAL — opt-in via CCTV_FAA_ENABLED=1)
+// ---------------------------------------------------------------------------
+/** FAA's aviation weather camera network (weathercams.faa.gov) — hundreds of
+ * public cameras with dense Alaska coverage. U.S. government work. The API
+ * schema is NOT pinned down the way NDBC's is, so this loader is opt-in and
+ * aggressively defensive: any schema surprise degrades to zero cameras with
+ * one console warning, never a broken catalog. */
+const FAA_WEATHERCAMS_ORIGIN = 'https://weathercams.faa.gov/';
+const FAA_WEATHERCAMS_API_URL = 'https://weathercams.faa.gov/api/cameras';
+/** Sized so the full built-in roster + FAA stays under the 1200 catalog hard
+ * bound with headroom for custom file/env packs. */
+const DEFAULT_FAA_MAX_SOURCES = 200;
+
+/**
+ * Extract camera rows from whatever shape the FAA cameras API returns.
+ *
+ * Accepts a bare array or an object wrapping one under a plausible key, and
+ * per row tries the common spellings for coordinates, ids, names, and image
+ * URLs. Rows without finite coordinates and an https image URL on the FAA
+ * origin are skipped. Exported for fixture tests.
+ *
+ * @param {*} payload - Parsed JSON payload.
+ * @returns {Array<{id: string, name: string, lat: number, lon: number, imageUrl: string, pageUrl: string}>}
+ */
+export function extractFaaWeathercamEntries(payload) {
+  const rows = [];
+  const list = Array.isArray(payload)
+    ? payload
+    : ['cameras', 'sites', 'cameraSites', 'features', 'data', 'items', 'results']
+      .map((key) => payload?.[key])
+      .find(Array.isArray) || [];
+  const pick = (obj, keys) => {
+    for (const key of keys) {
+      const value = obj?.[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  };
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    // GeoJSON-style rows keep data under properties/geometry.
+    const props = raw.properties && typeof raw.properties === 'object' ? { ...raw, ...raw.properties } : raw;
+    const geom = Array.isArray(raw.geometry?.coordinates) ? raw.geometry.coordinates : null;
+    const lat = Number(pick(props, ['latitude', 'lat', 'siteLatitude', 'cameraLatitude']) ?? (geom ? geom[1] : NaN));
+    const lon = Number(pick(props, ['longitude', 'lon', 'lng', 'siteLongitude', 'cameraLongitude']) ?? (geom ? geom[0] : NaN));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const id = String(pick(props, ['cameraId', 'cameraID', 'id', 'siteId', 'siteID']) ?? '').trim();
+    if (!id) continue;
+    const name = String(pick(props, ['siteName', 'name', 'cameraName', 'title']) ?? `FAA Camera ${id}`).trim();
+    let imageUrl = String(pick(props, ['currentImageUri', 'currentImage', 'imageUri', 'imageUrl', 'image', 'url']) ?? '').trim();
+    if (imageUrl.startsWith('/')) imageUrl = FAA_WEATHERCAMS_ORIGIN.replace(/\/$/, '') + imageUrl;
+    if (!imageUrl.startsWith(FAA_WEATHERCAMS_ORIGIN)) continue; // origin pin
+    const siteId = String(pick(props, ['siteId', 'siteID']) ?? id).trim();
+    rows.push({
+      id,
+      name,
+      lat,
+      lon,
+      imageUrl,
+      pageUrl: `${FAA_WEATHERCAMS_ORIGIN}cameras/state/US`,
+      siteId,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Fetch the FAA WeatherCams catalog (experimental, opt-in).
+ *
+ * @returns {Promise<Array<object>>} Normalized-shape raw sources, [] unless
+ *   CCTV_FAA_ENABLED=1 and the API answers in a recognized shape.
+ */
+async function loadFaaWeathercamSources() {
+  if (String(process.env.CCTV_FAA_ENABLED || '').trim() !== '1') return [];
+  try {
+    const resp = await fetch(FAA_WEATHERCAMS_API_URL, {
+      headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn('[CCTV] FAA WeatherCams download failed:', resp.status);
+      return [];
+    }
+    const rows = extractFaaWeathercamEntries(await resp.json());
+    if (!rows.length) {
+      console.warn('[CCTV] FAA WeatherCams: API answered but no rows matched the expected shapes (experimental loader — schema may have shifted).');
+      return [];
+    }
+    const maxRaw = Number(process.env.CCTV_FAA_MAX_SOURCES || DEFAULT_FAA_MAX_SOURCES);
+    const maxCount = Number.isFinite(maxRaw) ? Math.max(8, Math.min(600, Math.floor(maxRaw))) : DEFAULT_FAA_MAX_SOURCES;
+    const cameras = rows.slice(0, maxCount).map((row) => ({
+      id: `faa-${row.id}`,
+      name: row.name,
+      city: 'FAA Weather Camera',
+      cityId: 'faa-weathercams',
+      provider: 'FAA Weather Camera Program',
+      lat: row.lat,
+      lon: row.lon,
+      headingConfidence: 'low',
+      pitchDeg: -6,
+      fovDeg: 70,
+      rangeM: 900,
+      mountHeightM: 8,
+      feedType: 'image',
+      url: row.imageUrl,
+      snapshotUrl: row.imageUrl,
+      pageUrl: row.pageUrl,
+      sourceKind: 'faa-weathercam',
+      license: 'FAA Weather Camera Program — U.S. government work, public domain.',
+    }));
+    console.log(`[CCTV] Loaded FAA WeatherCam sources: ${rows.length} available (using ${cameras.length})`);
+    return cameras;
+  } catch (error) {
+    console.warn('[CCTV] FAA WeatherCams download error:', error?.message || error);
     return [];
   }
 }
@@ -4244,20 +4467,26 @@ async function refreshCctvSources() {
   let fromCaltrans = [];
   let fromTfl = [];
   let fromUsLive = [];
+  let fromNoaa = [];
+  let fromFaa = [];
   if (needsLiveSources) {
-    const [austinResult, caltransResult, tflResult] = await Promise.allSettled([
+    const [austinResult, caltransResult, tflResult, noaaResult, faaResult] = await Promise.allSettled([
       loadAustinSourcesFromOpenData(),
       loadCaltransSourcesFromOpenData(),
       tflEnabled ? loadTflSourcesFromOpenData() : Promise.resolve([]),
+      loadNoaaBuoycamSources(),
+      loadFaaWeathercamSources(),
     ]);
     fromAustin = austinResult.status === 'fulfilled' ? austinResult.value : [];
     fromCaltrans = caltransResult.status === 'fulfilled' ? caltransResult.value : [];
     fromTfl = tflResult.status === 'fulfilled' ? tflResult.value : [];
+    fromNoaa = noaaResult.status === 'fulfilled' ? noaaResult.value : [];
+    fromFaa = faaResult.status === 'fulfilled' ? faaResult.value : [];
     // Bundled static pack — no network, same built-in gate as the city packs.
     fromUsLive = loadUsLiveWebcamSources();
   }
   // Live sources first so file/env overrides win on duplicate IDs (Map last-write).
-  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromUsLive, ...fromFile, ...fromEnv];
+  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromUsLive, ...fromNoaa, ...fromFaa, ...fromFile, ...fromEnv];
 
   // Deduplicate by camera ID (last-write wins because of Map.set)
   const byId = new Map();
