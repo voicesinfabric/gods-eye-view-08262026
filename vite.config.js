@@ -3402,6 +3402,12 @@ function normalizeFeedType(value) {
 /**
  * Check whether a normalized feed type represents streaming video.
  *
+ * MJPEG is deliberately NOT classified as video: browsers render
+ * multipart/x-mixed-replace via <img>, not <video>, so mjpeg sources follow
+ * the image path. Like video sources, they must carry a snapshotUrl for
+ * /frame — their stream URL is an unbounded body the still fetcher must
+ * never touch (see frameUpstreamCandidate).
+ *
  * @param {string} feedType
  * @returns {boolean}
  */
@@ -3999,6 +4005,40 @@ async function loadCaltransSourcesFromOpenData() {
  *
  * @returns {Promise<Array<object>>} Normalized camera source objects.
  */
+/** Re-arm cadence for TfL clip mode: clips are ~10s loops the bucket rotates
+ * every few minutes; a 60s re-fetch keeps the loop near-current for a few
+ * hundred KB per minute per active camera. */
+const TFL_CLIP_REFRESH_SEC = 60;
+
+/**
+ * Feed-shape fields for one TfL JamCam catalog entry.
+ *
+ * Stills-first remains the product rule and the DEFAULT: with videoEnabled
+ * false — or no usable videoUrl — the output is byte-identical to the
+ * historical stills shape. CCTV_TFL_VIDEO=1 opts a camera into its published
+ * ~10s MP4 clip (props.videoUrl, pinned to the same official TfL bucket as
+ * frames): the clip becomes the media url, the still stays snapshotUrl (the
+ * panel preview and /frame never touch the clip), and clipRefreshSec tells
+ * the client to re-arm the loop as TfL rotates clips.
+ *
+ * @param {object} props - Flattened JamCam additionalProperties.
+ * @param {boolean} videoEnabled - CCTV_TFL_VIDEO=1 opt-in state.
+ * @returns {{feedType: string, url: string, snapshotUrl: string, clipRefreshSec?: number}}
+ */
+export function tflFeedFields(props, videoEnabled) {
+  const imageUrl = String(props?.imageUrl || '');
+  const videoUrl = String(props?.videoUrl || '');
+  if (!videoEnabled || !videoUrl.startsWith(TFL_IMAGE_ORIGIN)) {
+    return { feedType: 'image', url: imageUrl, snapshotUrl: imageUrl };
+  }
+  return {
+    feedType: 'mp4',
+    url: videoUrl,
+    snapshotUrl: imageUrl,
+    clipRefreshSec: TFL_CLIP_REFRESH_SEC,
+  };
+}
+
 async function loadTflSourcesFromOpenData() {
   try {
     const appKey = String(process.env.TFL_APP_KEY || '').trim();
@@ -4011,6 +4051,7 @@ async function loadTflSourcesFromOpenData() {
     const places = await resp.json();
     if (!Array.isArray(places)) return [];
 
+    const tflVideoEnabled = String(process.env.CCTV_TFL_VIDEO || '').trim() === '1';
     const cameras = [];
     for (const place of places) {
       const props = {};
@@ -4046,9 +4087,9 @@ async function loadTflSourcesFromOpenData() {
         rangeM: 145,
         mountHeightM: 8,
         groundElevationM: 15, // Thames-basin prior; one-shot snap corrects.
-        feedType: 'image', // stills-first (product rule); props.videoUrl deliberately unused
-        url: imageUrl,
-        snapshotUrl: imageUrl,
+        // Stills-first (product rule) stays the default; CCTV_TFL_VIDEO=1
+        // opts into props.videoUrl clip mode via tflFeedFields.
+        ...tflFeedFields(props, tflVideoEnabled),
         sourceKind: 'tfl-open-data',
         license: 'Powered by TfL Open Data',
       });
@@ -4071,7 +4112,7 @@ async function loadTflSourcesFromOpenData() {
  * @param {object} item - Raw source from file, env, or Austin Open Data.
  * @returns {object} Normalized source with all expected fields populated.
  */
-function normalizeSourceItem(item) {
+export function normalizeSourceItem(item) {
   return {
     id: String(item.id || '').trim(),
     name: String(item.name || item.id || '').trim(),
@@ -4092,6 +4133,13 @@ function normalizeSourceItem(item) {
     snapshotUrl: typeof item.snapshotUrl === 'string' ? item.snapshotUrl : '',
     license: String(item.license || item.licenseNote || ''),
     sourceKind: String(item.sourceKind || item.kind || 'configured'),
+    // Optional finite-clip re-arm cadence (seconds) for clip-rotation feeds
+    // like TfL JamCam MP4 loops. Additive: absent for continuous streams and
+    // legacy packs — the client only refreshes a clip when a source declares
+    // this (cctvVideoPolicy.clipRefreshDueAt returns null otherwise).
+    clipRefreshSec: Number.isFinite(Number(item.clipRefreshSec)) && Number(item.clipRefreshSec) > 0
+      ? Number(item.clipRefreshSec)
+      : undefined,
     // Optional CAL badge input (cctv-v2 design §3b/§9.2, additive-only per the
     // global constraints — nothing else in this file changes): hand-authored
     // file/env catalog entries may declare poseSource:'curated' so the panel
@@ -4399,6 +4447,237 @@ export async function fetchCctvImageFromUpstream(url, {
   }
 }
 
+/** Response-header timeout for the live media proxy. Live streams are
+ * unbounded by design, so this bounds only the connect/header phase: the
+ * timer is cleared the moment upstream headers arrive, and an established
+ * stream is never killed by it. Stall recovery is the client's job (bounded
+ * reconnect in src/data/cctv.js). */
+export const CCTV_MEDIA_HEADERS_TIMEOUT_MS = 10 * 1000;
+
+/** Cap on concurrently open media-proxy upstream streams. The client plays at
+ * most one projection stream (pauseInactiveProjectionFeeds) plus an optional
+ * panel player, so legitimate concurrency is 1-2; 4 leaves headroom without
+ * letting a misbehaving client pin unbounded upstream sockets. */
+export const CCTV_MEDIA_MAX_CONCURRENT = 4;
+
+/**
+ * Open an upstream media fetch whose timeout covers only the header phase.
+ *
+ * Returns the raw fetch Response (ok or not — the caller decides how to map
+ * upstream status) plus a cancel() that aborts the transfer; wire cancel to
+ * the client response's 'close' event so a disconnected client can't leave
+ * the upstream stream running. Throws on network failure or header timeout,
+ * matching the /media handler's existing catch path.
+ *
+ * @param {string} url - Server-registered upstream media URL.
+ * @param {object} [options]
+ * @param {typeof fetch} [options.fetchImpl=fetch] - Injectable for tests.
+ * @param {number} [options.headersTimeoutMs=CCTV_MEDIA_HEADERS_TIMEOUT_MS]
+ * @param {string} [options.rangeHeader] - Client Range header to forward.
+ * @returns {Promise<{upstream: Response, cancel: () => void}|null>} null for a
+ *   non-http(s) URL.
+ */
+export async function fetchCctvMediaUpstream(url, {
+  fetchImpl = fetch,
+  headersTimeoutMs = CCTV_MEDIA_HEADERS_TIMEOUT_MS,
+  rangeHeader = '',
+} = {}) {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException('CCTV upstream media headers timed out', 'TimeoutError'));
+  }, headersTimeoutMs);
+  const headers = { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' };
+  if (rangeHeader) headers.Range = rangeHeader;
+  try {
+    const upstream = await fetchImpl(url, { headers, signal: controller.signal });
+    return {
+      upstream,
+      cancel: () => {
+        try { controller.abort(new DOMException('Client disconnected', 'AbortError')); } catch { /* no-op */ }
+      },
+    };
+  } finally {
+    // Headers arrived (or the fetch settled) — from here the body may stream
+    // for hours, so the header timer must not outlive this call.
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Bounded admission gate for concurrently open media streams.
+ *
+ * tryAcquire() returns a release function while capacity remains, else null.
+ * Release is idempotent — wiring it to both 'finish' and 'close' on the
+ * client response cannot double-decrement, so a decrement bug can't wedge
+ * the media endpoint shut.
+ *
+ * @param {number} [maxConcurrent=CCTV_MEDIA_MAX_CONCURRENT]
+ * @returns {{tryAcquire: () => (() => void)|null, activeCount: () => number}}
+ */
+export function createMediaStreamGate(maxConcurrent = CCTV_MEDIA_MAX_CONCURRENT) {
+  let active = 0;
+  return {
+    tryAcquire() {
+      if (active >= maxConcurrent) return null;
+      active += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        active -= 1;
+      };
+    },
+    activeCount() {
+      return active;
+    },
+  };
+}
+
+/**
+ * Resolve which server-registered URL /frame may hand to the still-image
+ * fetcher. snapshotUrl always wins; without one, video (mp4/webm/hls) AND
+ * mjpeg sources return '' — both are unbounded stream bodies that would hang
+ * the frame fetch until its abort — so snapshot-less stream cameras fall
+ * through to the Street View / synthetic chain instead.
+ *
+ * @param {object|null|undefined} source - Registered catalog entry.
+ * @returns {string} Upstream still URL, or '' when none is safe to fetch.
+ */
+export function frameUpstreamCandidate(source) {
+  if (!source) return '';
+  if (typeof source.snapshotUrl === 'string' && source.snapshotUrl.trim()) {
+    return source.snapshotUrl;
+  }
+  const feedType = normalizeFeedType(source.feedType);
+  if (isVideoFeedType(feedType) || feedType === 'mjpeg') return '';
+  return typeof source.url === 'string' ? source.url : '';
+}
+
+/** Hard cap on a buffered HLS playlist body. Real-world media playlists are a
+ * few KB; 2 MB tolerates giant VOD playlists while keeping the rewrite path
+ * un-OOM-able. */
+export const CCTV_HLS_MANIFEST_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Resolve one client-requested HLS sub-path against a camera's registered
+ * manifest URL — the security boundary of the /api/cctv/hls route.
+ *
+ * The client never supplies a full URL: only a path that must resolve to the
+ * SAME ORIGIN as the server-registered manifest. Explicit schemes,
+ * protocol-relative jumps ("//host"), backslashes, and `..` traversal are all
+ * rejected before resolution; a resolved cross-origin result rejects after.
+ * This is a deliberate, narrow relaxation of the CCTV "no client-supplied
+ * URLs" rule: client-chosen *paths* on the *registered host only*
+ * (documented in SECURITY.md).
+ *
+ * @param {string} relPath - Decoded path (+optional query) from the route.
+ * @param {string} manifestUrl - The camera's registered manifest URL.
+ * @returns {string|null} Absolute upstream URL, or null when refused.
+ */
+export function resolveHlsRelativeUrl(relPath, manifestUrl) {
+  const raw = String(relPath || '');
+  if (!raw || raw.includes('\\')) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) return null;
+  if (raw.split(/[/?#]/).some((segment) => segment === '..')) return null;
+  let base;
+  try { base = new URL(String(manifestUrl || '')); } catch { return null; }
+  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
+  let resolved;
+  try { resolved = new URL(raw, base); } catch { return null; }
+  if (resolved.origin !== base.origin) return null;
+  return resolved.href;
+}
+
+/**
+ * Map one URI from an upstream HLS playlist to its proxied /api/cctv/hls path.
+ * Returns null for URIs that resolve cross-origin to the manifest — the safe
+ * default is to drop those lines (curate same-origin streams; see plan).
+ */
+function hlsProxyUriFor(uri, { cameraId, manifestBase }) {
+  let resolved;
+  try { resolved = new URL(String(uri || '').trim(), manifestBase); } catch { return null; }
+  if (resolved.origin !== manifestBase.origin) return null;
+  const rel = `${resolved.pathname}${resolved.search}`;
+  return `/api/cctv/hls/${encodeURIComponent(cameraId)}/${encodeURIComponent(rel)}`;
+}
+
+/**
+ * Rewrite an HLS playlist so every URI it references flows back through the
+ * CCTV proxy. Raw piping would break playback: segment URIs are usually
+ * relative and would resolve against the proxy path and 404.
+ *
+ * - Bare URI lines (segments, variant playlists) are rewritten to
+ *   /api/cctv/hls/<id>/<encoded same-origin path>.
+ * - URI="..." attributes inside tag lines (EXT-X-MEDIA, EXT-X-MAP, EXT-X-KEY,
+ *   EXT-X-I-FRAME-STREAM-INF, EXT-X-PART, EXT-X-PRELOAD-HINT, …) are
+ *   rewritten the same way — missing these breaks fMP4 and encrypted streams.
+ * - Cross-origin URIs are DROPPED (with their attached #EXTINF/#EXT-X-BYTERANGE
+ *   lines, so the playlist stays well-formed); opts.onDrop reports each one.
+ * - Every other line passes through byte-identical.
+ *
+ * @param {string} manifestText - Raw upstream playlist.
+ * @param {object} opts
+ * @param {string} opts.cameraId - Registered camera id owning the manifest.
+ * @param {string} opts.manifestUrl - The playlist's own URL (resolution base —
+ *   pass the variant's URL when rewriting a nested variant playlist).
+ * @param {(uri: string) => void} [opts.onDrop] - Called per dropped URI.
+ * @returns {string} Rewritten playlist text.
+ */
+export function rewriteHlsManifest(manifestText, { cameraId, manifestUrl, onDrop } = {}) {
+  let manifestBase;
+  try { manifestBase = new URL(String(manifestUrl || '')); } catch { return String(manifestText || ''); }
+  const ctx = { cameraId: String(cameraId || ''), manifestBase };
+
+  const out = [];
+  /** Tag lines (#EXTINF, #EXT-X-BYTERANGE) that attach to the NEXT URI line —
+   * held back so a dropped cross-origin segment takes its metadata with it. */
+  let pendingSegmentTags = [];
+  const lines = String(manifestText || '').split(/\r?\n/);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      out.push(...pendingSegmentTags, line);
+      pendingSegmentTags = [];
+      continue;
+    }
+    if (trimmed.startsWith('#')) {
+      if (/^#EXTINF[:]/i.test(trimmed) || /^#EXT-X-BYTERANGE[:]/i.test(trimmed)) {
+        pendingSegmentTags.push(line);
+        continue;
+      }
+      const uriMatch = /URI="([^"]*)"/i.exec(line);
+      if (uriMatch) {
+        const proxied = hlsProxyUriFor(uriMatch[1], ctx);
+        if (proxied === null) {
+          onDrop?.(uriMatch[1]);
+          out.push(...pendingSegmentTags);
+          pendingSegmentTags = [];
+          continue; // drop the whole tag line — never leak a direct upstream URI
+        }
+        out.push(...pendingSegmentTags, line.replace(uriMatch[0], `URI="${proxied}"`));
+        pendingSegmentTags = [];
+        continue;
+      }
+      out.push(...pendingSegmentTags, line);
+      pendingSegmentTags = [];
+      continue;
+    }
+    // Bare URI line: a media segment or a variant playlist reference.
+    const proxied = hlsProxyUriFor(trimmed, ctx);
+    if (proxied === null) {
+      onDrop?.(trimmed);
+      pendingSegmentTags = [];
+      continue;
+    }
+    out.push(...pendingSegmentTags, proxied);
+    pendingSegmentTags = [];
+  }
+  out.push(...pendingSegmentTags);
+  return out.join('\n');
+}
+
 /**
  * Vite plugin: CCTV camera proxy with source registry, frame/media serving,
  * fallback chain (upstream -> Street View -> synthetic SVG), and health tracking.
@@ -4415,6 +4694,8 @@ export async function fetchCctvImageFromUpstream(url, {
 function cctvProxy() {
   /** @type {Map<string,{id:string,status:string,sourceKind:string,label:string,message:string,updatedAt:number}>} */
   const health = new Map();
+  /** Admission gate shared by all live media streams this plugin serves. */
+  const mediaGate = createMediaStreamGate();
   /** Cap on health map entries to prevent unbounded growth. Sized to cover the
    * full served catalog (CCTV_MAX_SOURCES hard-bounds at 1200) so health/status
    * observability isn't silently evicted for a default 800-camera catalog. */
@@ -4518,6 +4799,7 @@ function cctvProxy() {
                 sourceKind: source.sourceKind || (source.url ? 'configured' : 'fallback'),
                 poseSource: source.poseSource,
                 license: source.license,
+                clipRefreshSec: source.clipRefreshSec,
               })),
             };
             res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -4558,13 +4840,30 @@ function cctvProxy() {
               return;
             }
 
+            const releaseStream = mediaGate.tryAcquire();
+            if (!releaseStream) {
+              res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'Media proxy at capacity, retry shortly' }));
+              return;
+            }
+            // Idempotent release on both events: 'finish' for a clean end,
+            // 'close' for client disconnects (and it also follows 'finish').
+            res.on('finish', releaseStream);
+            res.on('close', releaseStream);
+
             try {
-              const upstreamHeaders = { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' };
-              const requestRange = req.headers?.range;
-              if (requestRange) upstreamHeaders.Range = requestRange;
-              const upstream = await fetch(mediaUrl, {
-                headers: upstreamHeaders,
+              const opened = await fetchCctvMediaUpstream(mediaUrl, {
+                rangeHeader: req.headers?.range || '',
               });
+              if (!opened) {
+                res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                res.end(JSON.stringify({ error: 'No media URL configured for this camera' }));
+                return;
+              }
+              const { upstream, cancel } = opened;
+              // A client that walks away must not leave the upstream stream
+              // running; aborting after a completed transfer is a no-op.
+              res.on('close', cancel);
               const contentType = upstream.headers.get('content-type') || '';
               if (!upstream.ok) {
                 setHealth(cameraId, {
@@ -4594,6 +4893,34 @@ function cctvProxy() {
                 });
               }
 
+              // HLS playlists must be rewritten, not piped: their (usually
+              // relative) URIs would otherwise resolve against the proxy path
+              // and 404. Segments/nested variants flow back via /api/cctv/hls.
+              if (feedType === 'hls' && (contentType.includes('mpegurl') || /\.m3u8(?:\?|$)/i.test(mediaUrl))) {
+                const { tooLarge, text } = await readCappedResponseText(upstream, CCTV_HLS_MANIFEST_MAX_BYTES);
+                if (tooLarge) {
+                  res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                  res.end(JSON.stringify({ error: 'Upstream playlist exceeds size cap' }));
+                  return;
+                }
+                let dropped = 0;
+                const rewritten = rewriteHlsManifest(text, {
+                  cameraId,
+                  manifestUrl: mediaUrl,
+                  onDrop: () => { dropped += 1; },
+                });
+                if (dropped > 0) {
+                  console.warn(`[CCTV] HLS manifest for ${cameraId}: dropped ${dropped} cross-origin URI(s)`);
+                }
+                res.writeHead(200, {
+                  'Content-Type': 'application/vnd.apple.mpegurl',
+                  'Cache-Control': 'no-store',
+                  'X-CCTV-Source': 'live-media',
+                });
+                res.end(rewritten);
+                return;
+              }
+
               await proxyMediaResponse(res, upstream, {
                 sourceHeader: isVideoFeedType(feedType) ? 'live-media' : 'upstream-image',
               });
@@ -4607,6 +4934,105 @@ function cctvProxy() {
               });
               res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
               res.end(JSON.stringify({ error: 'Media proxy failed' }));
+              return;
+            }
+          }
+
+          if (url.pathname.startsWith('/hls/')) {
+            const rest = url.pathname.slice('/hls/'.length);
+            const slashIdx = rest.indexOf('/');
+            if (slashIdx <= 0 || slashIdx === rest.length - 1) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'Invalid HLS path' }));
+              return;
+            }
+            let cameraId;
+            let relPath;
+            try {
+              cameraId = decodeURIComponent(rest.slice(0, slashIdx));
+              relPath = decodeURIComponent(rest.slice(slashIdx + 1));
+            } catch {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'Invalid HLS path' }));
+              return;
+            }
+            const source = sourceById.get(cameraId);
+            const feedType = normalizeFeedType(source?.feedType || 'image');
+            if (!source || feedType !== 'hls' || !/^https?:\/\//i.test(source.url || '')) {
+              res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'Unknown HLS camera' }));
+              return;
+            }
+            const target = resolveHlsRelativeUrl(relPath, source.url);
+            if (!target) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'Invalid HLS path' }));
+              return;
+            }
+
+            // Playlist re-polls are tiny capped reads on a short timeout; only
+            // segment transfers — the actual byte streams — count against the
+            // media gate, so two concurrent HLS sessions can't starve it with
+            // their playlist polling.
+            const isPlaylistPath = /\.m3u8(?:\?|$)/i.test(target);
+            if (!isPlaylistPath) {
+              const releaseStream = mediaGate.tryAcquire();
+              if (!releaseStream) {
+                res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                res.end(JSON.stringify({ error: 'Media proxy at capacity, retry shortly' }));
+                return;
+              }
+              res.on('finish', releaseStream);
+              res.on('close', releaseStream);
+            }
+
+            try {
+              const opened = await fetchCctvMediaUpstream(target, {
+                rangeHeader: req.headers?.range || '',
+              });
+              const { upstream, cancel } = opened;
+              res.on('close', cancel);
+              if (!upstream.ok) {
+                res.writeHead(upstream.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                res.end(JSON.stringify({ error: `Upstream returned ${upstream.status}` }));
+                return;
+              }
+              const segType = upstream.headers.get('content-type') || '';
+              if (isPlaylistPath || segType.includes('mpegurl')) {
+                const { tooLarge, text } = await readCappedResponseText(upstream, CCTV_HLS_MANIFEST_MAX_BYTES);
+                if (tooLarge) {
+                  res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                  res.end(JSON.stringify({ error: 'Upstream playlist exceeds size cap' }));
+                  return;
+                }
+                let dropped = 0;
+                const rewritten = rewriteHlsManifest(text, {
+                  cameraId,
+                  manifestUrl: target,
+                  onDrop: () => { dropped += 1; },
+                });
+                if (dropped > 0) {
+                  console.warn(`[CCTV] HLS playlist for ${cameraId}: dropped ${dropped} cross-origin URI(s)`);
+                }
+                res.writeHead(200, {
+                  'Content-Type': 'application/vnd.apple.mpegurl',
+                  'Cache-Control': 'no-store',
+                  'X-CCTV-Source': 'live-media',
+                });
+                res.end(rewritten);
+                return;
+              }
+              await proxyMediaResponse(res, upstream, { sourceHeader: 'live-media' });
+              return;
+            } catch (error) {
+              setHealth(cameraId, {
+                status: 'degraded',
+                sourceKind: 'upstream',
+                label: source?.provider || 'Configured source',
+                message: error?.message || 'HLS fetch failed',
+              });
+              res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(JSON.stringify({ error: 'HLS proxy failed' }));
               return;
             }
           }
@@ -4629,9 +5055,7 @@ function cctvProxy() {
 
           // Only use server-registered upstream URLs — never accept client-supplied URLs
           // (prevents SSRF via ?upstream= query parameter)
-          const upstreamCandidate =
-            source?.snapshotUrl
-            || (!isVideoFeedType(normalizeFeedType(source?.feedType)) ? source?.url : '');
+          const upstreamCandidate = frameUpstreamCandidate(source);
 
           const upstreamImage = await fetchCctvImageFromUpstream(upstreamCandidate);
           if (upstreamImage?.ok) {

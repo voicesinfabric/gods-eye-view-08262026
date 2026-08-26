@@ -6271,6 +6271,30 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   opacity: 1;
 }
 
+/* Live-video preview: the <video> sibling takes the wrap over from the <img>
+   when the active camera is a video feed (mp4/webm/hls). Same 16:9 contained
+   box as the still for a stable panel height across camera switches. */
+#cctv-video {
+  display: none;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  object-fit: contain;
+  background: #000;
+}
+
+.cctv-frame-wrap.has-video #cctv-video {
+  display: block;
+}
+
+.cctv-frame-wrap.has-video #cctv-frame {
+  display: none;
+}
+
+#cctv-source-badge[data-frame-state='live'] {
+  color: var(--accent, #00d4ff);
+}
+
 #cctv-meta {
   font-family: var(--font-mono);
   font-size: 9px;

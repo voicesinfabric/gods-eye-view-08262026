@@ -3,6 +3,38 @@
 This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
+## [Unreleased] — 2026-08-26
+
+### Added
+
+- Live video for the CCTV layer, opt-in end to end. The existing (previously
+  dormant) `feedType: mp4|webm|hls` pipeline is now production-supported:
+  source packs can register live HLS/MP4 cameras (`CCTV_SOURCES_FILE`, see
+  `config/cctv_sources.dot-hls.example.json`), and `CCTV_TFL_VIDEO=1` upgrades
+  TfL JamCams from stills to their published ~10s MP4 clips (stills remain the
+  default; the still always stays the panel/frame snapshot).
+- HLS playback everywhere: the media proxy rewrites playlists so every URI
+  flows back through `/api/cctv/hls/<id>/…` (same-origin-only, traversal
+  rejected; cross-origin URIs dropped), and the client lazily code-splits
+  `hls.js` for browsers without native HLS — the chunk loads only when an HLS
+  camera is activated. Safari plays natively and never loads it.
+- Bounded reconnects for live video: a media error (or stall without buffered
+  runway) re-arms the stream on an exponential 2s→30s backoff, capped at 6
+  attempts, then falls back to the placeholder + degraded health chip.
+
+### Changed
+
+- The media proxy now bounds its connect phase (10s header timeout that never
+  kills an established stream), caps concurrently open streams (4, surplus gets
+  503), and cancels the upstream transfer when the client disconnects.
+- `/api/cctv/frame` no longer hands a snapshot-less MJPEG stream URL to the
+  still-image fetcher (it would hang until the timeout); like video feeds,
+  MJPEG sources need a `snapshotUrl` for stills.
+- `.env.example`'s CCTV block now documents the source-pack gate
+  (`CCTV_FORCE_AUSTIN=1` coexistence), the new video flags, and the real
+  default caps (250 Austin / 900 overall); two flags that no longer exist
+  (`CCTV_AUTO_CALIBRATE`, `CCTV_DRAPE_MESH`) were removed from it.
+
 ## [Unreleased] — 2026-08-24
 
 ### Added
