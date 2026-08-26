@@ -3415,6 +3415,26 @@ function isVideoFeedType(feedType) {
   return feedType === 'mp4' || feedType === 'webm' || feedType === 'hls';
 }
 
+/**
+ * Validate an operator "live feed page" URL for the ACCESS LIVE FEED action.
+ * The browser opens this in a NEW TAB (it is never fetched or framed by the
+ * proxy), so the only rules are: https, no embedded credentials. Anything
+ * else — including http, schemes, or garbage — is dropped to undefined so the
+ * field simply doesn't exist on the served catalog entry.
+ *
+ * @param {*} value - Raw pageUrl from a source-pack entry.
+ * @returns {string|undefined} Normalized https URL, or undefined.
+ */
+export function publicHttpsPageUrl(value) {
+  try {
+    const url = new URL(String(value ?? ''));
+    if (url.protocol !== 'https:' || url.username || url.password) return undefined;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // CCTV proxy constants and source cache state
 // ---------------------------------------------------------------------------
@@ -3508,6 +3528,32 @@ function loadSourcesFromFile() {
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.warn('[CCTV] failed to read source file:', resolved, error?.message || error);
+    return [];
+  }
+}
+
+/** Bundled U.S. live-webcam pack (publicly published municipal/tourism/marina
+ * cameras with ACCESS LIVE FEED pages). Behaves like a fourth built-in city
+ * pack: loaded under the same live-pack gate as Austin/Caltrans/TfL, so a
+ * custom CCTV_SOURCES_FILE/CCTV_SOURCES_JSON still replaces the built-ins
+ * unless CCTV_FORCE_AUSTIN=1 forces them on. CCTV_USLIVE_ENABLED=0 is its
+ * dedicated kill switch (mirrors CCTV_TFL_ENABLED). */
+const USLIVE_SOURCE_FILE = 'config/cctv_sources.us-live.json';
+
+/**
+ * Load the bundled U.S. live-webcam source pack.
+ *
+ * @returns {Array<object>} Raw source objects, or [] when disabled/unreadable.
+ */
+function loadUsLiveWebcamSources() {
+  if (String(process.env.CCTV_USLIVE_ENABLED || '1').trim() === '0') return [];
+  const resolved = path.resolve(__dirname, USLIVE_SOURCE_FILE);
+  try {
+    if (!fs.existsSync(resolved)) return [];
+    const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn('[CCTV] failed to read US live-webcam pack:', error?.message || error);
     return [];
   }
 }
@@ -4140,6 +4186,10 @@ export function normalizeSourceItem(item) {
     clipRefreshSec: Number.isFinite(Number(item.clipRefreshSec)) && Number(item.clipRefreshSec) > 0
       ? Number(item.clipRefreshSec)
       : undefined,
+    // Optional operator live-feed page for the ACCESS LIVE FEED action.
+    // Opened by the browser in a new tab — never fetched or framed by the
+    // proxy — so https-with-no-credentials is the whole admission rule.
+    pageUrl: publicHttpsPageUrl(item.pageUrl),
     // Optional CAL badge input (cctv-v2 design §3b/§9.2, additive-only per the
     // global constraints — nothing else in this file changes): hand-authored
     // file/env catalog entries may declare poseSource:'curated' so the panel
@@ -4193,6 +4243,7 @@ async function refreshCctvSources() {
   let fromAustin = [];
   let fromCaltrans = [];
   let fromTfl = [];
+  let fromUsLive = [];
   if (needsLiveSources) {
     const [austinResult, caltransResult, tflResult] = await Promise.allSettled([
       loadAustinSourcesFromOpenData(),
@@ -4202,9 +4253,11 @@ async function refreshCctvSources() {
     fromAustin = austinResult.status === 'fulfilled' ? austinResult.value : [];
     fromCaltrans = caltransResult.status === 'fulfilled' ? caltransResult.value : [];
     fromTfl = tflResult.status === 'fulfilled' ? tflResult.value : [];
+    // Bundled static pack — no network, same built-in gate as the city packs.
+    fromUsLive = loadUsLiveWebcamSources();
   }
   // Live sources first so file/env overrides win on duplicate IDs (Map last-write).
-  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromFile, ...fromEnv];
+  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromUsLive, ...fromFile, ...fromEnv];
 
   // Deduplicate by camera ID (last-write wins because of Map.set)
   const byId = new Map();
@@ -4800,6 +4853,7 @@ function cctvProxy() {
                 poseSource: source.poseSource,
                 license: source.license,
                 clipRefreshSec: source.clipRefreshSec,
+                pageUrl: source.pageUrl,
               })),
             };
             res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

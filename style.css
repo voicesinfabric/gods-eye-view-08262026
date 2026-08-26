@@ -6295,6 +6295,20 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: var(--accent, #00d4ff);
 }
 
+/* ACCESS LIVE FEED — anchor styled like the panel's scene buttons; shown only
+   when the active camera publishes an operator live-feed page. */
+#cctv-live-link {
+  display: block;
+  margin: 4px 0;
+  text-align: center;
+  text-decoration: none;
+  color: var(--accent, #00d4ff);
+}
+
+#cctv-live-link[hidden] {
+  display: none;
+}
+
 #cctv-meta {
   font-family: var(--font-mono);
   font-size: 9px;

@@ -2,6 +2,26 @@
 
 Updated: August 26, 2026
 
+> **2026-08-26 — bundled U.S. live-webcam pack + ACCESS LIVE FEED.**
+> `config/cctv_sources.us-live.json` (~70 publicly published webcams — Ocean
+> City MD, Corpus Christi TX, Maryland CHART, NASA ISS, and ~37 place-specific
+> marina/lighthouse/main-street cameras) loads as a fourth built-in CCTV pack
+> under the existing live-pack gate (`loadUsLiveWebcamSources`,
+> `CCTV_USLIVE_ENABLED=0` kill switch; a custom `CCTV_SOURCES_FILE` still
+> replaces built-ins). New catalog field `pageUrl` (server admission
+> `publicHttpsPageUrl` — https, credential-free; client re-check `safePageUrl`;
+> final https guard at the href sink) flows source pack → `/sources` DTO →
+> `buildCatalogFromSources` → `getPublicCameraState`. The CCTV panel shows an
+> **ACCESS LIVE FEED ↗** anchor (`#cctv-live-link`, `target="_blank"`,
+> `rel="noopener noreferrer"`) for the active camera when a pageUrl exists —
+> the app never fetches or frames those operator pages. IPCamLive entries also
+> carry the provider's documented `snapshot.php` endpoint as
+> `url`/`snapshotUrl`, so they get real in-app stills through the unchanged
+> frame pipeline; page-only entries fall through the normal frame chain.
+> Positions are curated approximations (gizmo-calibratable); the ISS stream is
+> anchored at NASA JSC. Tests: `cctvSourcePacks.test.mjs` (pack shape, 70-count,
+> snapshot-endpoint pinning, `publicHttpsPageUrl` admission).
+
 > **2026-08-26 — CCTV live video, opt-in end to end.** The dormant
 > `feedType: mp4|webm|hls` pipeline is now production-supported and everything
 > about it is additive: default runs are unchanged (all three live city packs

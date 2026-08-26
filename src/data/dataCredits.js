@@ -128,6 +128,12 @@ export const DATA_CREDITS = [
       'Contains OS data © Crown copyright and database rights.',
   },
   {
+    key: 'us-live-webcams',
+    html:
+      'U.S. live webcams: municipal, tourism &amp; local operators ' +
+      '(per-camera attribution in the CCTV panel; ACCESS LIVE FEED opens the operator’s own page)',
+  },
+  {
     key: 'gbfs',
     html: 'Bikeshare availability: GBFS operator feeds (e.g. Austin BCycle)',
   },

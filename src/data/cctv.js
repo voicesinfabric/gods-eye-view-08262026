@@ -590,6 +590,23 @@ function isVideoFeedType(feedType) {
 }
 
 /**
+ * Client-side re-validation of an operator live-feed page URL (defense in
+ * depth over the server's admission rule, mirroring the radio layer's
+ * do-not-trust-our-own-server posture): https only, no embedded credentials.
+ * @param {*} value
+ * @returns {string|null}
+ */
+function safePageUrl(value) {
+  try {
+    const url = new URL(String(value ?? ''));
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Coerces a value to a finite number or returns the fallback.
  * @param {*} value
  * @param {number} [fallback=NaN]
@@ -1187,6 +1204,9 @@ function buildCatalogFromSources(rawSources) {
       clipRefreshSec: safeNumber(source.clipRefreshSec) > 0
         ? safeNumber(source.clipRefreshSec)
         : undefined,
+      // Operator live-feed page for the panel's ACCESS LIVE FEED action
+      // (opened in a new tab by the UI; never fetched by the app).
+      pageUrl: safePageUrl(source.pageUrl),
     };
     ensureCameraPose(camera);
     catalog.push(camera);
@@ -3596,6 +3616,7 @@ function getPublicCameraState(record, activeId = null) {
     basePose: camera.basePose ? { ...camera.basePose } : null,
     frameUrl: frameUrlFor(camera, refreshMs),
     mediaUrl: mediaUrlFor(camera),
+    pageUrl: camera.pageUrl || null,
   };
 }
 

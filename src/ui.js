@@ -2366,6 +2366,7 @@ export class StyleManager {
       this._cctvVideo.addEventListener('error', this._onCctvVideoStateChange);
     }
     this._cctvSourceBadge = document.getElementById('cctv-source-badge');
+    this._cctvLiveLink = document.getElementById('cctv-live-link');
     this._cctvMeta = document.getElementById('cctv-meta');
     this._cctvSummary = document.getElementById('cctv-summary');
     this._shareBtn = document.getElementById('share-btn');
@@ -6760,6 +6761,23 @@ export class StyleManager {
         if (!nextSrc) {
           this._clearCctvFrame();
         }
+      }
+    }
+
+    // ACCESS LIVE FEED: cameras whose operator publishes a live player/page
+    // expose it as a new-tab action. Final https guard here even though the
+    // server and catalog already validated — an href is a navigation sink.
+    if (this._cctvLiveLink) {
+      const pageUrl = enabled && typeof activeCamera?.pageUrl === 'string'
+        && activeCamera.pageUrl.startsWith('https://')
+        ? activeCamera.pageUrl
+        : '';
+      if (pageUrl) {
+        this._cctvLiveLink.href = pageUrl;
+        this._cctvLiveLink.hidden = false;
+      } else {
+        this._cctvLiveLink.removeAttribute('href');
+        this._cctvLiveLink.hidden = true;
       }
     }
 

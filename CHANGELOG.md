@@ -21,6 +21,16 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 - Bounded reconnects for live video: a media error (or stall without buffered
   runway) re-arms the stream on an exponential 2s→30s backoff, capped at 6
   attempts, then falls back to the placeholder + degraded health chip.
+- A bundled U.S. live-webcam directory (`config/cctv_sources.us-live.json`,
+  ~70 publicly published cameras: Ocean City MD, Corpus Christi TX, and
+  place-specific marinas/lighthouses/main-street cams across ~25 states) loads
+  as a fourth built-in CCTV pack (`CCTV_USLIVE_ENABLED=0` disables). Clicking
+  one of these cameras surfaces an **ACCESS LIVE FEED ↗** action in the CCTV
+  panel that opens the operator's own live player/portal in a new tab
+  (https-only, `noopener`); IPCamLive cameras additionally serve in-app stills
+  through the provider's snapshot endpoint via the existing frame pipeline.
+  The new `pageUrl` catalog field carrying this is validated server-side and
+  client-side and never fetched or framed by the app.
 
 ### Changed
 
