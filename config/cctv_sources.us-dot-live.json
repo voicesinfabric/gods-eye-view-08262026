@@ -1,7 +1,7 @@
 [
   {
     "_comment": "U.S. DOT & federal live-camera pack — batch 1 of an assisted web-research harvest (2026-08-26).",
-    "_provenance": "Compiled from official state DOT / 511 traveler-information systems (DelDOT, MoDOT, WisDOT, Nevada DOT, Louisiana DOTD, GDOT, ADOT, Alaska DOT&PF, NCDOT DriveNC, Oregon TripCheck) plus one NPS webcam. Media URLs follow each system's published streaming pattern; per-entry liveness was checked during research (see license notes) but streams rotate — the app's per-camera health chips and bounded reconnects handle any that go dark. Coordinates come from provider metadata except entries marked posEstimated. Batch 2 (2026-08-26) adds 13 Maryland CHART cameras as page-linked markers: the research batch supplied provider coordinates but no per-camera stream URLs, so they were downgraded from the claimed 'hls' rather than shipped broken. Batch 4 (2026-08-27) adds 21 NPS park webcams (Yellowstone, Glacier, Mount Rainier, Yosemite, Great Smoky Mountains) as page-linked entries with per-camera nps.gov webcam pages; the Old Faithful row claimed 'hls' without a stream URL and was downgraded per the url-less rule. Batch 5 (2026-08-27) adds 12 NPS webcams — 10 with endpoint-checked direct still images on the nps.gov webcams-<park> path (plus one Pixelcaster CDN snapshot for Kolb Studio; a stale epoch cache-buster was stripped from the Big Bend URL) and 2 page-linked.",
+    "_provenance": "Compiled from official state DOT / 511 traveler-information systems (DelDOT, MoDOT, WisDOT, Nevada DOT, Louisiana DOTD, GDOT, ADOT, Alaska DOT&PF, NCDOT DriveNC, Oregon TripCheck) plus one NPS webcam. Media URLs follow each system's published streaming pattern; per-entry liveness was checked during research (see license notes) but streams rotate — the app's per-camera health chips and bounded reconnects handle any that go dark. Coordinates come from provider metadata except entries marked posEstimated. Batch 2 (2026-08-26) adds 13 Maryland CHART cameras as page-linked markers: the research batch supplied provider coordinates but no per-camera stream URLs, so they were downgraded from the claimed 'hls' rather than shipped broken. Batch 4 (2026-08-27) adds 21 NPS park webcams (Yellowstone, Glacier, Mount Rainier, Yosemite, Great Smoky Mountains) as page-linked entries with per-camera nps.gov webcam pages; the Old Faithful row claimed 'hls' without a stream URL and was downgraded per the url-less rule. Batch 5 (2026-08-27) adds 12 NPS webcams — 10 with endpoint-checked direct still images on the nps.gov webcams-<park> path (plus one Pixelcaster CDN snapshot for Kolb Studio; a stale epoch cache-buster was stripped from the Big Bend URL) and 2 page-linked. Batch 6 (2026-08-27) adds 3 Idaho 511 cameras page-linked to the operator site root; the batch's two per-camera page ids were discarded as pattern-generated (sequential, inconsistent with the embedded camera numbers).",
     "_behavior": "HLS entries play in-app (projection plane + panel player); page-only entries expose ACCESS LIVE FEED to the operator's own map/player. Disable this pack with CCTV_USDOT_ENABLED=0."
   },
   {
@@ -2777,5 +2777,59 @@
     "pageUrl": "https://www.nps.gov/media/webcam/view.htm?id=81B46B71-1DD8-B71B-0B55074571E08B1E",
     "license": "NPS-published webcam served through a partner-operated PhenoCam endpoint; retain NPS and partner attribution. Compiled 2026-08-27.",
     "posEstimated": true
+  },
+  {
+    "id": "idaho511-946-i184-milwaukee-franklin",
+    "name": "I-184 Milwaukee at Franklin — traffic camera",
+    "city": "Boise",
+    "cityId": "boise-idaho",
+    "provider": "Idaho Transportation Department",
+    "lat": 43.60515,
+    "lon": -116.28108,
+    "headingConfidence": "low",
+    "pitchDeg": -12,
+    "fovDeg": 60,
+    "rangeM": 400,
+    "mountHeightM": 10,
+    "feedType": "image",
+    "sourceKind": "idaho511",
+    "pageUrl": "https://511.idaho.gov/",
+    "license": "Idaho Transportation Department publishes this camera through Idaho 511 for public traveler information; retain ITD/Idaho 511 attribution. Compiled 2026-08-27. The research batch supplied no direct media URL, and its per-camera page ids failed plausibility checks (sequential ids inconsistent with the camera numbers), so this entry links the Idaho 511 site."
+  },
+  {
+    "id": "idaho511-947-us20-myrtle-9th",
+    "name": "US-20 Myrtle at 9th Street — traffic camera",
+    "city": "Boise",
+    "cityId": "boise-idaho",
+    "provider": "Idaho Transportation Department",
+    "lat": 43.613018,
+    "lon": -116.207596,
+    "headingConfidence": "low",
+    "pitchDeg": -12,
+    "fovDeg": 60,
+    "rangeM": 400,
+    "mountHeightM": 10,
+    "feedType": "image",
+    "sourceKind": "idaho511",
+    "pageUrl": "https://511.idaho.gov/",
+    "license": "Idaho Transportation Department publishes this camera through Idaho 511 for public traveler information; retain ITD/Idaho 511 attribution. Compiled 2026-08-27. The research batch supplied no direct media URL, and its per-camera page ids failed plausibility checks (sequential ids inconsistent with the camera numbers), so this entry links the Idaho 511 site."
+  },
+  {
+    "id": "idaho511-fourth-of-july-pass",
+    "name": "I-90 Fourth of July Pass — mountain-pass roadway camera",
+    "city": "Coeur d'Alene area",
+    "cityId": "coeur-dalene-idaho",
+    "provider": "Idaho Transportation Department",
+    "lat": 47.619315,
+    "lon": -116.520554,
+    "headingConfidence": "low",
+    "pitchDeg": -12,
+    "fovDeg": 60,
+    "rangeM": 400,
+    "mountHeightM": 10,
+    "feedType": "image",
+    "sourceKind": "idaho511",
+    "pageUrl": "https://511.idaho.gov/",
+    "license": "Idaho Transportation Department publishes this camera through Idaho 511 for public traveler information; retain ITD/Idaho 511 attribution. Compiled 2026-08-27. The research batch supplied no direct media URL, and its per-camera page ids failed plausibility checks (sequential ids inconsistent with the camera numbers), so this entry links the Idaho 511 site."
   }
 ]
