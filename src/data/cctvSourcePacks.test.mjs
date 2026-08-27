@@ -97,7 +97,7 @@ test('US live-webcam pack: every camera has an ACCESS LIVE FEED page', () => {
 
 test('US DOT live-camera pack: sanitized direct links, no cross-pack collisions', () => {
   const entries = loadPack('config/cctv_sources.us-dot-live.json');
-  assert.equal(entries.length, 149, 'research batches 1-6 deduped to 149 cameras (batch 3 rejected as duplicates)');
+  assert.equal(entries.length, 164, 'research batches 1-7 deduped to 164 cameras (batch 3 rejected as duplicates)');
   // Batch-5 sanitization rule: no bare epoch cache-busters (scraped
   // point-in-time artifacts) may survive in any media URL.
   for (const raw of entries) {
