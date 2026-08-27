@@ -3535,35 +3535,50 @@ function loadSourcesFromFile() {
   }
 }
 
-/** Bundled U.S. live-webcam pack (publicly published municipal/tourism/marina
- * cameras with ACCESS LIVE FEED pages). Behaves like a fourth built-in city
- * pack: loaded under the same live-pack gate as Austin/Caltrans/TfL, so a
- * custom CCTV_SOURCES_FILE/CCTV_SOURCES_JSON still replaces the built-ins
- * unless CCTV_FORCE_AUSTIN=1 forces them on. CCTV_USLIVE_ENABLED=0 is its
- * dedicated kill switch (mirrors CCTV_TFL_ENABLED). */
+/** Bundled camera packs (publicly published webcams + DOT/federal cameras
+ * with ACCESS LIVE FEED pages). Each behaves like a built-in city pack:
+ * loaded under the same live-pack gate as Austin/Caltrans/TfL, so a custom
+ * CCTV_SOURCES_FILE/CCTV_SOURCES_JSON still replaces the built-ins unless
+ * CCTV_FORCE_AUSTIN=1 forces them on. Each has a dedicated kill switch
+ * (mirrors CCTV_TFL_ENABLED). */
 const USLIVE_SOURCE_FILE = 'config/cctv_sources.us-live.json';
+const USDOT_SOURCE_FILE = 'config/cctv_sources.us-dot-live.json';
 
 /**
- * Load the bundled U.S. live-webcam source pack.
+ * Read one bundled camera-pack JSON, skipping pseudo-entries (leading
+ * _comment docs blocks carry no id). Logs the load count like the live
+ * city packs so a missing pack (stale checkout, CCTV_SOURCES_FILE
+ * override) is diagnosable.
  *
- * @returns {Array<object>} Raw source objects, or [] when disabled/unreadable.
+ * @param {string} file - Repo-relative pack path.
+ * @param {string} label - Human label for load/warn logging.
+ * @returns {Array<object>} Raw source objects, or [] when unreadable.
  */
-function loadUsLiveWebcamSources() {
-  if (String(process.env.CCTV_USLIVE_ENABLED || '1').trim() === '0') return [];
-  const resolved = path.resolve(__dirname, USLIVE_SOURCE_FILE);
+function readBundledCameraPack(file, label) {
+  const resolved = path.resolve(__dirname, file);
   try {
     if (!fs.existsSync(resolved)) return [];
     const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
     const entries = Array.isArray(parsed) ? parsed : [];
     const cameras = entries.filter((item) => item && typeof item === 'object' && String(item.id || '').trim());
-    // Match the per-pack load logging of the live city packs so a missing
-    // pack (stale checkout, CCTV_SOURCES_FILE override) is diagnosable.
-    console.log(`[CCTV] Loaded US live-webcam pack: ${cameras.length} cameras`);
+    console.log(`[CCTV] Loaded ${label}: ${cameras.length} cameras`);
     return cameras;
   } catch (error) {
-    console.warn('[CCTV] failed to read US live-webcam pack:', error?.message || error);
+    console.warn(`[CCTV] failed to read ${label}:`, error?.message || error);
     return [];
   }
+}
+
+/** @returns {Array<object>} The bundled U.S. live-webcam pack (or []). */
+function loadUsLiveWebcamSources() {
+  if (String(process.env.CCTV_USLIVE_ENABLED || '1').trim() === '0') return [];
+  return readBundledCameraPack(USLIVE_SOURCE_FILE, 'US live-webcam pack');
+}
+
+/** @returns {Array<object>} The bundled U.S. DOT/federal camera pack (or []). */
+function loadUsDotCameraSources() {
+  if (String(process.env.CCTV_USDOT_ENABLED || '1').trim() === '0') return [];
+  return readBundledCameraPack(USDOT_SOURCE_FILE, 'US DOT live-camera pack');
 }
 
 // ---------------------------------------------------------------------------
@@ -4467,6 +4482,7 @@ async function refreshCctvSources() {
   let fromCaltrans = [];
   let fromTfl = [];
   let fromUsLive = [];
+  let fromUsDot = [];
   let fromNoaa = [];
   let fromFaa = [];
   if (needsLiveSources) {
@@ -4482,11 +4498,12 @@ async function refreshCctvSources() {
     fromTfl = tflResult.status === 'fulfilled' ? tflResult.value : [];
     fromNoaa = noaaResult.status === 'fulfilled' ? noaaResult.value : [];
     fromFaa = faaResult.status === 'fulfilled' ? faaResult.value : [];
-    // Bundled static pack — no network, same built-in gate as the city packs.
+    // Bundled static packs — no network, same built-in gate as the city packs.
     fromUsLive = loadUsLiveWebcamSources();
+    fromUsDot = loadUsDotCameraSources();
   }
   // Live sources first so file/env overrides win on duplicate IDs (Map last-write).
-  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromUsLive, ...fromNoaa, ...fromFaa, ...fromFile, ...fromEnv];
+  const merged = [...fromAustin, ...fromCaltrans, ...fromTfl, ...fromUsLive, ...fromUsDot, ...fromNoaa, ...fromFaa, ...fromFile, ...fromEnv];
 
   // Deduplicate by camera ID (last-write wins because of Map.set)
   const byId = new Map();

@@ -134,6 +134,13 @@ export const DATA_CREDITS = [
       '(per-camera attribution in the CCTV panel; ACCESS LIVE FEED opens the operator’s own page)',
   },
   {
+    key: 'us-dot-cameras',
+    html:
+      'State DOT traffic cameras: DelDOT, MoDOT, WisDOT, Nevada DOT, Louisiana DOTD, ' +
+      'GDOT, ADOT, Alaska DOT&amp;PF, NCDOT DriveNC &amp; ODOT TripCheck ' +
+      '(“Camera courtesy of ODOT”; per-camera attribution in the CCTV panel)',
+  },
+  {
     key: 'noaa-buoycams',
     html:
       'Offshore BuoyCAMs: ' +

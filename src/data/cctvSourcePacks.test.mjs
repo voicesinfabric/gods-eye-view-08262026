@@ -10,6 +10,7 @@ const PACKS = [
   'config/cctv_sources.shinjuku.json',
   'config/cctv_sources.dot-hls.example.json',
   'config/cctv_sources.us-live.json',
+  'config/cctv_sources.us-dot-live.json',
 ];
 
 function loadPack(rel) {
@@ -92,6 +93,33 @@ test('US live-webcam pack: every camera has an ACCESS LIVE FEED page', () => {
   }
   const withSnapshots = entries.filter((e) => e.snapshotUrl).length;
   assert.ok(withSnapshots >= 20, 'the IPCamLive majority keeps in-app stills');
+});
+
+test('US DOT live-camera pack: sanitized direct links, no cross-pack collisions', () => {
+  const entries = loadPack('config/cctv_sources.us-dot-live.json');
+  assert.equal(entries.length, 100, 'research batch 1 deduped to 100 cameras');
+  for (const raw of entries) {
+    const s = normalizeSourceItem(raw);
+    assert.match(s.pageUrl || '', /^https:\/\//, `${s.id} must carry a pageUrl`);
+    if (s.feedType === 'hls') {
+      assert.match(s.url, /\.m3u8$/, `${s.id} HLS url must be a playlist`);
+    }
+    // Scraped template artifacts (e.g. TripCheck's <%=intRandom%>) must be gone.
+    assert.ok(!/%3C|%25|<%/i.test(s.url || ''), `${s.id} url carries template junk`);
+    assert.ok(!/:443\//.test(s.url || ''), `${s.id} url should have :443 normalized away`);
+    // Page-only rows must never reach the still fetcher.
+    if (!s.url) {
+      assert.equal(frameUpstreamCandidate(s), '', `${s.id} page-only entry leaked into /frame`);
+    }
+  }
+  const hls = entries.filter((e) => e.feedType === 'hls').length;
+  assert.ok(hls >= 80, 'the batch is predominantly direct HLS streams');
+
+  // No id collisions across the bundled packs (they merge into one catalog).
+  const usLiveIds = new Set(loadPack('config/cctv_sources.us-live.json').map((e) => e.id));
+  for (const e of entries) {
+    assert.ok(!usLiveIds.has(e.id), `${e.id} collides with the us-live pack`);
+  }
 });
 
 test('publicHttpsPageUrl admits only credential-free https URLs', () => {

@@ -2,6 +2,18 @@
 
 Updated: August 26, 2026
 
+> **2026-08-26 — bundled U.S. DOT live-camera pack (research batch 1).**
+> `config/cctv_sources.us-dot-live.json` — 100 cameras from official state
+> DOT/511 systems (91 direct HLS: DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 1 TripCheck
+> still; 8 page-linked). Loaded via the shared `readBundledCameraPack` helper
+> (also now backing the us-live pack) under the live-pack gate;
+> `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
+> no credentials, no IP hosts, `:443` normalized, scraped template artifacts
+> stripped (TripCheck `?rand=<%=intRandom%>`), finite provider coordinates,
+> id/url dedupe within and across packs (`cctvSourcePacks.test.mjs` enforces
+> all of it, 100-count pinned). DOT streams rotate; health chips + bounded
+> reconnects absorb dark streams.
+
 > **2026-08-26 — nationwide open-access camera packs (NOAA + FAA).**
 > `loadNoaaBuoycamSources()` (vite.config.js) fetches NDBC's published BuoyCAM
 > KML per catalog refresh (15s timeout, exported `parseBuoycamKml` — regex
