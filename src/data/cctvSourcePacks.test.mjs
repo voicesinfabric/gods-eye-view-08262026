@@ -97,7 +97,7 @@ test('US live-webcam pack: every camera has an ACCESS LIVE FEED page', () => {
 
 test('US DOT live-camera pack: sanitized direct links, no cross-pack collisions', () => {
   const entries = loadPack('config/cctv_sources.us-dot-live.json');
-  assert.equal(entries.length, 113, 'research batches 1+2 deduped to 113 cameras');
+  assert.equal(entries.length, 134, 'research batches 1-4 deduped to 134 cameras (batch 3 rejected as duplicates)');
   // Batch-2 downgrade rule: a research row claiming a video feedType without
   // an actual stream URL must never ship as video (it would 404 into the
   // reconnect ladder by construction) — page-linked image entries only.

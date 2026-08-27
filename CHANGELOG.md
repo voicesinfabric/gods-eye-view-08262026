@@ -21,16 +21,18 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 - Bounded reconnects for live video: a media error (or stall without buffered
   runway) re-arms the stream on an exponential 2s→30s backoff, capped at 6
   attempts, then falls back to the placeholder + degraded health chip.
-- A bundled **U.S. DOT live-camera pack** (batches 1–2 of an assisted
-  web-research harvest): 113 cameras from official state DOT / 511 systems —
+- A bundled **U.S. DOT & federal live-camera pack** (batches 1–4 of an
+  assisted web-research harvest; batch 3 was rejected wholesale as
+  URL-less duplicates): 134 cameras —
   91 direct HLS streams (DelDOT 25, MoDOT 60, WisDOT 2, Nevada DOT 2,
   Louisiana DOTD 2) that play in-app through the HLS proxy, one Oregon
   TripCheck direct still (validation stripped a scraped template artifact
-  from its URL), and 21 page-linked cameras (Maryland CHART ×13 — supplied
+  from its URL), and 42 page-linked cameras: Maryland CHART ×13 (supplied
   without stream URLs and downgraded from the claimed video type rather than
-  shipped broken — plus 511GA/AZ511/Alaska/DriveNC/NPS). Provider
-  coordinates, per-entry attribution, cross-pack dedupe;
-  `CCTV_USDOT_ENABLED=0` disables.
+  shipped broken), 511GA/AZ511/Alaska/DriveNC, and 22 NPS park webcams
+  (Yellowstone, Glacier, Mount Rainier, Yosemite, Great Smokies, Grand
+  Canyon) with per-camera nps.gov pages. Provider coordinates, per-entry
+  attribution, cross-pack dedupe; `CCTV_USDOT_ENABLED=0` disables.
 - Nationwide open-access camera packs: a live **NOAA NDBC BuoyCAM** loader
   (~82 offshore cameras from NDBC's published KML, direct public-domain
   `buoycam.php` JPEGs, station page as the live-feed link; `CCTV_NOAA_ENABLED=0`
