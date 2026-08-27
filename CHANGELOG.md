@@ -58,6 +58,12 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ### Changed
 
+- The CCTV catalog hard bound rises 1200 → 2400 and the default cap to
+  1600, after auditing what scales with catalog size (terrain ground-prior
+  batching is chunked at 200 points, coverage geometry is lazy, billboards
+  are the only linear render cost); the proxy health map now derives from
+  the hard bound so per-camera observability keeps covering the full
+  catalog.
 - The media proxy now bounds its connect phase (10s header timeout that never
   kills an established stream), caps concurrently open streams (4, surplus gets
   503), and cancels the upstream transfer when the client disconnects.

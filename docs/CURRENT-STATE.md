@@ -14,9 +14,13 @@ Updated: August 26, 2026
 > replaced with the operator site root; batch 7: 15 more DelDOT HLS
 > cameras — the US 13 Dover→Harrington corridor, monotonic-progression
 > validated; batch 8: 43 WSDOT I-5 cameras page-linked to WSDOT's
-> per-segment pages, distance-per-milepost validated). NOTE: the default
-> catalog now sits near the 1200 hard bound (~1160 with all live packs
-> healthy); enabling the opt-in FAA pack can truncate the tail. Loaded via the shared `readBundledCameraPack` helper
+> per-segment pages, distance-per-milepost validated). The catalog hard
+> bound was raised 1200 → 2400 and the default cap to 1600 (2026-08-27)
+> after auditing catalog-size scaling: terrain ground-prior fetches chunk
+> at 200 points sequentially, coverage geometry materializes lazily for
+> the active/visible set only, and per-camera billboards are the sole
+> linear render cost; `HEALTH_MAX_ENTRIES` now derives from the hard
+> bound so observability keeps its full-catalog invariant. Loaded via the shared `readBundledCameraPack` helper
 > (also now backing the us-live pack) under the live-pack gate;
 > `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
 > no credentials, no IP hosts, `:443` normalized, scraped template artifacts

@@ -3444,11 +3444,21 @@ const DEFAULT_CCTV_SOURCE_FILE = 'config/cctv_sources.austin.json';
 const DEFAULT_AUSTIN_ROWS_URL = 'https://data.austintexas.gov/api/views/b4k4-adkb/rows.json?accessType=DOWNLOAD';
 /** Default cap on Austin cameras after distance-based prioritization. */
 const DEFAULT_AUSTIN_MAX_SOURCES = 250;
-/** Global cap on total CCTV sources served by the proxy. Sized for the full
- * built-in roster (Austin 250 + Caltrans 300 + TfL 250 + US live-webcam 70 +
- * NOAA BuoyCAM ~82, plus opt-in FAA headroom) — matches the 1200 hard bound
- * and the health-map capacity, which were already sized for this. */
-const DEFAULT_CCTV_MAX_SOURCES = 1200;
+/** Hard ceiling on the served CCTV catalog. Raised 1200 → 2400 (2026-08-27)
+ * after auditing what scales with catalog size: client terrain ground-prior
+ * batching already chunks at 200 points sequentially (never near the terrain
+ * proxy's 2000-point per-request cap), coverage geometry materializes lazily
+ * for the active/visible set only, and per-camera billboards are the sole
+ * linear render cost (the flights layer sustains thousands). The health map
+ * (HEALTH_MAX_ENTRIES) is sized to this bound and must move in lockstep. */
+const CCTV_MAX_SOURCES_HARD_BOUND = 2400;
+
+/** Global cap on total CCTV sources served by the proxy. Default sized for
+ * the full built-in roster (Austin 250 + Caltrans 300 + TfL 250 + US
+ * live-webcam 70 + US DOT/federal pack ~207 + NOAA BuoyCAM ~82) plus the
+ * opt-in FAA pack and headroom for further bundled-pack growth; raise via
+ * CCTV_MAX_SOURCES up to the hard bound. */
+const DEFAULT_CCTV_MAX_SOURCES = 1600;
 /** Reference point for Austin camera prioritization (Congress & 6th). */
 const AUSTIN_DOWNTOWN = { lat: 30.2672, lon: -97.7431 };
 /** Caltrans CCTV: one JSON feed per district, identical schema statewide. */
@@ -4516,7 +4526,7 @@ async function refreshCctvSources() {
 
   const mergedSources = Array.from(byId.values());
   const maxRaw = Number(process.env.CCTV_MAX_SOURCES || DEFAULT_CCTV_MAX_SOURCES);
-  const maxCount = Number.isFinite(maxRaw) ? Math.max(8, Math.min(1200, Math.floor(maxRaw))) : DEFAULT_CCTV_MAX_SOURCES;
+  const maxCount = Number.isFinite(maxRaw) ? Math.max(8, Math.min(CCTV_MAX_SOURCES_HARD_BOUND, Math.floor(maxRaw))) : DEFAULT_CCTV_MAX_SOURCES;
   if (mergedSources.length > maxCount) {
     console.warn(`[CCTV] source catalog ${mergedSources.length} exceeds cap ${maxCount}; keeping the first ${maxCount} (raise CCTV_MAX_SOURCES or lower a per-pack cap to change which).`);
   }
@@ -4996,9 +5006,9 @@ function cctvProxy() {
   /** Admission gate shared by all live media streams this plugin serves. */
   const mediaGate = createMediaStreamGate();
   /** Cap on health map entries to prevent unbounded growth. Sized to cover the
-   * full served catalog (CCTV_MAX_SOURCES hard-bounds at 1200) so health/status
+   * full served catalog (CCTV_MAX_SOURCES_HARD_BOUND) so health/status
    * observability isn't silently evicted for a default 800-camera catalog. */
-  const HEALTH_MAX_ENTRIES = 1200;
+  const HEALTH_MAX_ENTRIES = CCTV_MAX_SOURCES_HARD_BOUND;
 
   /** Update the health entry for a camera, evicting the oldest entry if at capacity. */
   const setHealth = (cameraId, patch) => {
