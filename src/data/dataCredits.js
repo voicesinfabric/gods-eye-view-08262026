@@ -141,6 +141,14 @@ export const DATA_CREDITS = [
       '(“Camera courtesy of ODOT”; per-camera attribution in the CCTV panel)',
   },
   {
+    key: 'usgs-volcano-webcams',
+    html:
+      'Volcano webcams: ' +
+      '<a href="https://www.usgs.gov/volcanoes/kilauea/webcams" target="_blank" rel="noopener">USGS Hawaiian Volcano Observatory</a> ' +
+      '&amp; Yellowstone Volcano Observatory ' +
+      '(U.S. government work, public domain)',
+  },
+  {
     key: 'noaa-buoycams',
     html:
       'Offshore BuoyCAMs: ' +
