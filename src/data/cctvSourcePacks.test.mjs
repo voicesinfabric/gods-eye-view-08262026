@@ -97,7 +97,16 @@ test('US live-webcam pack: every camera has an ACCESS LIVE FEED page', () => {
 
 test('US DOT live-camera pack: sanitized direct links, no cross-pack collisions', () => {
   const entries = loadPack('config/cctv_sources.us-dot-live.json');
-  assert.equal(entries.length, 100, 'research batch 1 deduped to 100 cameras');
+  assert.equal(entries.length, 113, 'research batches 1+2 deduped to 113 cameras');
+  // Batch-2 downgrade rule: a research row claiming a video feedType without
+  // an actual stream URL must never ship as video (it would 404 into the
+  // reconnect ladder by construction) — page-linked image entries only.
+  for (const raw of entries) {
+    if (!raw.url) {
+      assert.equal(normalizeSourceItem(raw).feedType, 'image',
+        `${raw.id}: url-less entries must be page-linked, never video`);
+    }
+  }
   for (const raw of entries) {
     const s = normalizeSourceItem(raw);
     assert.match(s.pageUrl || '', /^https:\/\//, `${s.id} must carry a pageUrl`);

@@ -2,10 +2,12 @@
 
 Updated: August 26, 2026
 
-> **2026-08-26 — bundled U.S. DOT live-camera pack (research batch 1).**
-> `config/cctv_sources.us-dot-live.json` — 100 cameras from official state
+> **2026-08-26 — bundled U.S. DOT live-camera pack (research batches 1–2).**
+> `config/cctv_sources.us-dot-live.json` — 113 cameras from official state
 > DOT/511 systems (91 direct HLS: DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 1 TripCheck
-> still; 8 page-linked). Loaded via the shared `readBundledCameraPack` helper
+> still; 21 page-linked incl. 13 Maryland CHART rows that arrived with
+> coordinates but no stream URLs and were downgraded from the claimed video
+> type — `cctvSourcePacks.test.mjs` now enforces url-less ⇒ page-linked). Loaded via the shared `readBundledCameraPack` helper
 > (also now backing the us-live pack) under the live-pack gate;
 > `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
 > no credentials, no IP hosts, `:443` normalized, scraped template artifacts
