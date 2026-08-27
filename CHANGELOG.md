@@ -23,7 +23,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   attempts, then falls back to the placeholder + degraded health chip.
 - A bundled **U.S. DOT & federal live-camera pack** (batches 1–4 of an
   assisted web-research harvest; batch 3 was rejected wholesale as
-  URL-less duplicates): 164 cameras —
+  URL-less duplicates): 207 cameras —
   91 direct HLS streams (DelDOT 25, MoDOT 60, WisDOT 2, Nevada DOT 2,
   Louisiana DOTD 2) that play in-app through the HLS proxy, one Oregon
   TripCheck direct still (validation stripped a scraped template artifact

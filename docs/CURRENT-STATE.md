@@ -3,7 +3,7 @@
 Updated: August 26, 2026
 
 > **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–4).**
-> `config/cctv_sources.us-dot-live.json` — 164 cameras (106 direct HLS:
+> `config/cctv_sources.us-dot-live.json` — 207 cameras (106 direct HLS:
 > DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 11 direct stills: TripCheck + 10 NPS
 > webcams-&lt;park&gt; endpoints; 44 page-linked incl. 13 Maryland CHART rows
 > and NPS park webcams across 8 parks). Batch 3 was rejected wholesale
@@ -13,7 +13,10 @@ Updated: August 26, 2026
 > 164 count (batch 6: 3 Idaho 511 cameras, suspect per-camera page ids
 > replaced with the operator site root; batch 7: 15 more DelDOT HLS
 > cameras — the US 13 Dover→Harrington corridor, monotonic-progression
-> validated). Loaded via the shared `readBundledCameraPack` helper
+> validated; batch 8: 43 WSDOT I-5 cameras page-linked to WSDOT's
+> per-segment pages, distance-per-milepost validated). NOTE: the default
+> catalog now sits near the 1200 hard bound (~1160 with all live packs
+> healthy); enabling the opt-in FAA pack can truncate the tail. Loaded via the shared `readBundledCameraPack` helper
 > (also now backing the us-live pack) under the live-pack gate;
 > `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
 > no credentials, no IP hosts, `:443` normalized, scraped template artifacts
