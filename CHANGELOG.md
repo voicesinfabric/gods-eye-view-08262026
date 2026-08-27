@@ -23,11 +23,14 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   attempts, then falls back to the placeholder + degraded health chip.
 - A bundled **U.S. DOT & federal live-camera pack** (batches 1–4 of an
   assisted web-research harvest; batch 3 was rejected wholesale as
-  URL-less duplicates): 134 cameras —
+  URL-less duplicates): 146 cameras —
   91 direct HLS streams (DelDOT 25, MoDOT 60, WisDOT 2, Nevada DOT 2,
   Louisiana DOTD 2) that play in-app through the HLS proxy, one Oregon
   TripCheck direct still (validation stripped a scraped template artifact
-  from its URL), and 42 page-linked cameras: Maryland CHART ×13 (supplied
+  from its URL), 10 NPS direct-still webcams (Rocky Mountain, Olympic,
+  Crater Lake, Big Bend, Grand Canyon/Kolb Studio, Yellowstone/Mammoth —
+  live refreshing frames in-app; a stale epoch cache-buster was stripped
+  from the Big Bend URL), and 44 page-linked cameras: Maryland CHART ×13 (supplied
   without stream URLs and downgraded from the claimed video type rather than
   shipped broken), 511GA/AZ511/Alaska/DriveNC, and 22 NPS park webcams
   (Yellowstone, Glacier, Mount Rainier, Yosemite, Great Smokies, Grand

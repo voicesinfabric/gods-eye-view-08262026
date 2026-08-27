@@ -97,7 +97,13 @@ test('US live-webcam pack: every camera has an ACCESS LIVE FEED page', () => {
 
 test('US DOT live-camera pack: sanitized direct links, no cross-pack collisions', () => {
   const entries = loadPack('config/cctv_sources.us-dot-live.json');
-  assert.equal(entries.length, 134, 'research batches 1-4 deduped to 134 cameras (batch 3 rejected as duplicates)');
+  assert.equal(entries.length, 146, 'research batches 1-5 deduped to 146 cameras (batch 3 rejected as duplicates)');
+  // Batch-5 sanitization rule: no bare epoch cache-busters (scraped
+  // point-in-time artifacts) may survive in any media URL.
+  for (const raw of entries) {
+    const query = String(raw.url || '').split('?')[1] || '';
+    assert.ok(!/^\d+=?$/.test(query), `${raw.id}: stale cache-buster in url`);
+  }
   // Batch-2 downgrade rule: a research row claiming a video feedType without
   // an actual stream URL must never ship as video (it would 404 into the
   // reconnect ladder by construction) — page-linked image entries only.

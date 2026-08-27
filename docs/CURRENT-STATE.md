@@ -3,12 +3,14 @@
 Updated: August 26, 2026
 
 > **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–4).**
-> `config/cctv_sources.us-dot-live.json` — 134 cameras (91 direct HLS:
-> DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 1 TripCheck still; 42 page-linked incl.
-> 13 Maryland CHART rows and 21 NPS park webcams with per-camera nps.gov
-> pages). Batch 3 was rejected wholesale (URL-less duplicates with
-> pattern-generated page ids). `cctvSourcePacks.test.mjs` enforces
-> url-less ⇒ page-linked and pins the 134 count. Loaded via the shared `readBundledCameraPack` helper
+> `config/cctv_sources.us-dot-live.json` — 146 cameras (91 direct HLS:
+> DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 11 direct stills: TripCheck + 10 NPS
+> webcams-&lt;park&gt; endpoints; 44 page-linked incl. 13 Maryland CHART rows
+> and NPS park webcams across 8 parks). Batch 3 was rejected wholesale
+> (URL-less duplicates with pattern-generated page ids); batch 5's
+> sanitizer strips bare epoch cache-busters. `cctvSourcePacks.test.mjs`
+> enforces url-less ⇒ page-linked, no stale cache-busters, and pins the
+> 146 count. Loaded via the shared `readBundledCameraPack` helper
 > (also now backing the us-live pack) under the live-pack gate;
 > `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
 > no credentials, no IP hosts, `:443` normalized, scraped template artifacts
