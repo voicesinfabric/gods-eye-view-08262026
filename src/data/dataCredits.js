@@ -141,6 +141,13 @@ export const DATA_CREDITS = [
       '(“Camera courtesy of ODOT”; per-camera attribution in the CCTV panel)',
   },
   {
+    key: 'nps-webcams',
+    html:
+      'Park webcams: ' +
+      '<a href="https://www.nps.gov/subjects/watchingwildlife/webcams.htm" target="_blank" rel="noopener">National Park Service</a> ' +
+      '(NPS-produced federal content is generally public domain; partner-credited imagery retains its own attribution)',
+  },
+  {
     key: 'usgs-volcano-webcams',
     html:
       'Volcano webcams: ' +

@@ -2,22 +2,26 @@
 
 Updated: August 26, 2026
 
-> **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–9).**
-> `config/cctv_sources.us-dot-live.json` — 238 cameras (106 direct HLS:
+> **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–10).**
+> `config/cctv_sources.us-dot-live.json` — 249 cameras (106 direct HLS:
 > DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 11 direct stills: TripCheck + 10 NPS
-> webcams-&lt;park&gt; endpoints; 121 page-linked incl. 13 Maryland CHART rows
-> and NPS park webcams across 8 parks). Batch 3 was rejected wholesale
+> webcams-&lt;park&gt; endpoints; 132 page-linked incl. 13 Maryland CHART rows
+> and NPS park webcams across 14 parks). Batch 3 was rejected wholesale
 > (URL-less duplicates with pattern-generated page ids); batch 5's
 > sanitizer strips bare epoch cache-busters. `cctvSourcePacks.test.mjs`
 > enforces url-less ⇒ page-linked, no stale cache-busters, and pins the
-> 238 count (batch 6: 3 Idaho 511 cameras, suspect per-camera page ids
+> 249 count (batch 6: 3 Idaho 511 cameras, suspect per-camera page ids
 > replaced with the operator site root; batch 7: 15 more DelDOT HLS
 > cameras — the US 13 Dover→Harrington corridor, monotonic-progression
 > validated; batch 8: 43 WSDOT I-5 cameras page-linked to WSDOT's
 > per-segment pages, distance-per-milepost validated; batch 9: 31 USGS
 > volcano-observatory webcams — 29 HVO Kīlauea/Mauna Loa + 2 YVO
 > Yellowstone, page-linked to usgs.gov, public domain, `posEstimated`
-> coordinates with co-located instruments nudged ~10 m apart). The catalog hard
+> coordinates with co-located instruments nudged ~10 m apart; batch 10:
+> 11 more NPS webcams — Acadia, Arches, Zion, Grand Teton, Wrangell-St.
+> Elias, Glacier Bay, Glacier ×4, Denali Puppycam — page-linked, GUIDs
+> deduped against the existing 34 NPS entries, two url-less 'hls' claims
+> downgraded per the standing rule). The catalog hard
 > bound was raised 1200 → 2400 and the default cap to 1600 (2026-08-27)
 > after auditing catalog-size scaling: terrain ground-prior fetches chunk
 > at 200 points sequentially, coverage geometry materializes lazily for
