@@ -2,6 +2,15 @@
 
 Updated: August 26, 2026
 
+> **2026-08-28 — keyless boot.** A missing `GOOGLE_MAPS_API_KEY` no longer
+> throws out of `init()`: the app boots into the existing fallback ladder
+> (Cesium globe + OSM map stack; Re:Earth terrain when reachable, flat
+> ellipsoid otherwise) with a console notice. Google-backed features
+> (photoreal 3D Tiles, geocoding, Street View fallback) stay dark and are
+> guarded at their own call sites — verified in a full keyless browser
+> audit (all layer toggles, CCTV catalog 319 cameras, HLS reconnect
+> ladder, ACCESS LIVE FEED, honest per-layer UNAVAILABLE states).
+>
 > **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–10).**
 > `config/cctv_sources.us-dot-live.json` — 249 cameras (106 direct HLS:
 > DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 11 direct stills: TripCheck + 10 NPS

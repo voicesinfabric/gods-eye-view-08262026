@@ -61,6 +61,12 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ### Changed
 
+- A missing `GOOGLE_MAPS_API_KEY` no longer aborts initialization. The app
+  boots into its existing keyless ladder (Cesium globe + OSM map stack,
+  keyless terrain fallback) with a console notice; Google-backed features
+  (photorealistic 3D Tiles, geocoding, Street View fallback) stay dark and
+  are individually guarded at their call sites, exactly as they already
+  were for a key that fails after boot.
 - The CCTV catalog hard bound rises 1200 → 2400 and the default cap to
   1600, after auditing what scales with catalog size (terrain ground-prior
   batching is chunked at 200 points, coverage geometry is lazy, billboards

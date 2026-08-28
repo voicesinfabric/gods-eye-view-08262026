@@ -61,7 +61,9 @@ The live layers are grounded in public feeds: the airliner crossing your screen 
 
 Requires Node.js 24.14.x or 26.x (enforced by `package.json`).
 
-1. Copy `.env.example` → `.env` and set `GOOGLE_MAPS_API_KEY`.
+1. Copy `.env.example` → `.env` and set `GOOGLE_MAPS_API_KEY` (recommended —
+   without it the app boots keyless on the OSM globe stack, with no Google
+   photorealistic 3D Tiles or geocoding).
 2. Install and run:
 
 ```bash
