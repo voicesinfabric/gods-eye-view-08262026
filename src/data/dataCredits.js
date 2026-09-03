@@ -123,9 +123,51 @@ export const DATA_CREDITS = [
   {
     key: 'tfl-cctv',
     html:
-      'CCTV cameras &amp; frames (London): ' +
+      'CCTV cameras &amp; frames/clips (London): ' +
       '<a href="https://tfl.gov.uk/info-for/open-data-users/" target="_blank" rel="noopener">Powered by TfL Open Data</a>. ' +
       'Contains OS data © Crown copyright and database rights.',
+  },
+  {
+    key: 'us-live-webcams',
+    html:
+      'U.S. live webcams: municipal, tourism &amp; local operators ' +
+      '(per-camera attribution in the CCTV panel; ACCESS LIVE FEED opens the operator’s own page)',
+  },
+  {
+    key: 'us-dot-cameras',
+    html:
+      'State DOT traffic cameras: DelDOT, MoDOT, WisDOT, Nevada DOT, Louisiana DOTD, ' +
+      'GDOT, ADOT, Alaska DOT&amp;PF, NCDOT DriveNC &amp; ODOT TripCheck ' +
+      '(“Camera courtesy of ODOT”; per-camera attribution in the CCTV panel)',
+  },
+  {
+    key: 'nps-webcams',
+    html:
+      'Park webcams: ' +
+      '<a href="https://www.nps.gov/subjects/watchingwildlife/webcams.htm" target="_blank" rel="noopener">National Park Service</a> ' +
+      '(NPS-produced federal content is generally public domain; partner-credited imagery retains its own attribution)',
+  },
+  {
+    key: 'usgs-volcano-webcams',
+    html:
+      'Volcano webcams: ' +
+      '<a href="https://www.usgs.gov/volcanoes/kilauea/webcams" target="_blank" rel="noopener">USGS Hawaiian Volcano Observatory</a> ' +
+      '&amp; Yellowstone Volcano Observatory ' +
+      '(U.S. government work, public domain)',
+  },
+  {
+    key: 'noaa-buoycams',
+    html:
+      'Offshore BuoyCAMs: ' +
+      '<a href="https://www.ndbc.noaa.gov/buoycams.shtml" target="_blank" rel="noopener">NOAA National Data Buoy Center</a> ' +
+      '(U.S. government work, public domain)',
+  },
+  {
+    key: 'faa-weathercams',
+    html:
+      'Aviation weather cameras: ' +
+      '<a href="https://weathercams.faa.gov/" target="_blank" rel="noopener">FAA Weather Camera Program</a> ' +
+      '(U.S. government work, public domain)',
   },
   {
     key: 'gbfs',

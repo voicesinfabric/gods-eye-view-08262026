@@ -1,6 +1,112 @@
 # God's Eye View Current State
 
-Updated: August 24, 2026
+Updated: August 26, 2026
+
+> **2026-08-28 — keyless boot.** A missing `GOOGLE_MAPS_API_KEY` no longer
+> throws out of `init()`: the app boots into the existing fallback ladder
+> (Cesium globe + OSM map stack; Re:Earth terrain when reachable, flat
+> ellipsoid otherwise) with a console notice. Google-backed features
+> (photoreal 3D Tiles, geocoding, Street View fallback) stay dark and are
+> guarded at their own call sites — verified in a full keyless browser
+> audit (all layer toggles, CCTV catalog 319 cameras, HLS reconnect
+> ladder, ACCESS LIVE FEED, honest per-layer UNAVAILABLE states).
+>
+> **2026-08-26/27 — bundled U.S. DOT & federal live-camera pack (batches 1–10).**
+> `config/cctv_sources.us-dot-live.json` — 249 cameras (106 direct HLS:
+> DelDOT/MoDOT/WisDOT/NDOT/LADOTD; 11 direct stills: TripCheck + 10 NPS
+> webcams-&lt;park&gt; endpoints; 132 page-linked incl. 13 Maryland CHART rows
+> and NPS park webcams across 14 parks). Batch 3 was rejected wholesale
+> (URL-less duplicates with pattern-generated page ids); batch 5's
+> sanitizer strips bare epoch cache-busters. `cctvSourcePacks.test.mjs`
+> enforces url-less ⇒ page-linked, no stale cache-busters, and pins the
+> 249 count (batch 6: 3 Idaho 511 cameras, suspect per-camera page ids
+> replaced with the operator site root; batch 7: 15 more DelDOT HLS
+> cameras — the US 13 Dover→Harrington corridor, monotonic-progression
+> validated; batch 8: 43 WSDOT I-5 cameras page-linked to WSDOT's
+> per-segment pages, distance-per-milepost validated; batch 9: 31 USGS
+> volcano-observatory webcams — 29 HVO Kīlauea/Mauna Loa + 2 YVO
+> Yellowstone, page-linked to usgs.gov, public domain, `posEstimated`
+> coordinates with co-located instruments nudged ~10 m apart; batch 10:
+> 11 more NPS webcams — Acadia, Arches, Zion, Grand Teton, Wrangell-St.
+> Elias, Glacier Bay, Glacier ×4, Denali Puppycam — page-linked, GUIDs
+> deduped against the existing 34 NPS entries, two url-less 'hls' claims
+> downgraded per the standing rule). The catalog hard
+> bound was raised 1200 → 2400 and the default cap to 1600 (2026-08-27)
+> after auditing catalog-size scaling: terrain ground-prior fetches chunk
+> at 200 points sequentially, coverage geometry materializes lazily for
+> the active/visible set only, and per-camera billboards are the sole
+> linear render cost; `HEALTH_MAX_ENTRIES` now derives from the hard
+> bound so observability keeps its full-catalog invariant. Loaded via the shared `readBundledCameraPack` helper
+> (also now backing the us-live pack) under the live-pack gate;
+> `CCTV_USDOT_ENABLED=0` disables. Generation-time validation: https-only,
+> no credentials, no IP hosts, `:443` normalized, scraped template artifacts
+> stripped (TripCheck `?rand=<%=intRandom%>`), finite provider coordinates,
+> id/url dedupe within and across packs (`cctvSourcePacks.test.mjs` enforces
+> all of it, 100-count pinned). DOT streams rotate; health chips + bounded
+> reconnects absorb dark streams.
+
+> **2026-08-26 — nationwide open-access camera packs (NOAA + FAA).**
+> `loadNoaaBuoycamSources()` (vite.config.js) fetches NDBC's published BuoyCAM
+> KML per catalog refresh (15s timeout, exported `parseBuoycamKml` — regex
+> Placemark parse requiring a station-shaped id AND finite coordinates) and
+> registers ~82 offshore cameras with direct public-domain
+> `buoycam.php?station=…` JPEGs and `station_page.php` as `pageUrl`;
+> `CCTV_NOAA_ENABLED=0` / `CCTV_NOAA_MAX_SOURCES` govern it.
+> `loadFaaWeathercamSources()` is opt-in (`CCTV_FAA_ENABLED=1`) and
+> experimental: exported `extractFaaWeathercamEntries` accepts bare-array,
+> wrapped-key, and GeoJSON-ish payload shapes, origin-pins image URLs to
+> weathercams.faa.gov, and yields zero rows (one warning) on anything else.
+> Both run in the live-pack `Promise.allSettled` and fail independently.
+> `DEFAULT_CCTV_MAX_SOURCES` is now 1200 (== the hard bound) so the full
+> built-in roster (250+300+250+70+~82, +FAA 200 opt-in) never truncates.
+> Tests: `cctvOpenAccessPacks.test.mjs` (fixture KML/JSON parses, malformed-row
+> rejection).
+
+> **2026-08-26 — bundled U.S. live-webcam pack + ACCESS LIVE FEED.**
+> `config/cctv_sources.us-live.json` (~70 publicly published webcams — Ocean
+> City MD, Corpus Christi TX, Maryland CHART, NASA ISS, and ~37 place-specific
+> marina/lighthouse/main-street cameras) loads as a fourth built-in CCTV pack
+> under the existing live-pack gate (`loadUsLiveWebcamSources`,
+> `CCTV_USLIVE_ENABLED=0` kill switch; a custom `CCTV_SOURCES_FILE` still
+> replaces built-ins). New catalog field `pageUrl` (server admission
+> `publicHttpsPageUrl` — https, credential-free; client re-check `safePageUrl`;
+> final https guard at the href sink) flows source pack → `/sources` DTO →
+> `buildCatalogFromSources` → `getPublicCameraState`. The CCTV panel shows an
+> **ACCESS LIVE FEED ↗** anchor (`#cctv-live-link`, `target="_blank"`,
+> `rel="noopener noreferrer"`) for the active camera when a pageUrl exists —
+> the app never fetches or frames those operator pages. IPCamLive entries also
+> carry the provider's documented `snapshot.php` endpoint as
+> `url`/`snapshotUrl`, so they get real in-app stills through the unchanged
+> frame pipeline; page-only entries fall through the normal frame chain.
+> Positions are curated approximations (gizmo-calibratable); the ISS stream is
+> anchored at NASA JSC. Tests: `cctvSourcePacks.test.mjs` (pack shape, 70-count,
+> snapshot-endpoint pinning, `publicHttpsPageUrl` admission).
+
+> **2026-08-26 — CCTV live video, opt-in end to end.** The dormant
+> `feedType: mp4|webm|hls` pipeline is now production-supported and everything
+> about it is additive: default runs are unchanged (all three live city packs
+> stay `feedType: 'image'`).
+>
+> Server (`vite.config.js`): `/api/cctv/media/:id` gained a header-phase
+> timeout, a four-stream concurrency gate, and upstream cancel on client
+> disconnect (`fetchCctvMediaUpstream`, `createMediaStreamGate`); HLS playlists
+> are rewritten — never piped — so every URI flows back through the new
+> `/api/cctv/hls/<id>/<encoded same-origin path>` route
+> (`rewriteHlsManifest`, `resolveHlsRelativeUrl`; cross-origin URIs dropped);
+> `frameUpstreamCandidate` keeps snapshot-less video AND mjpeg stream URLs away
+> from the still fetcher; `normalizeSourceItem` passes through an optional
+> `clipRefreshSec`; `tflFeedFields` + `CCTV_TFL_VIDEO=1` upgrade TfL JamCams to
+> their published MP4 clips (stills stay the default and the snapshot).
+>
+> Client: `src/data/cctvVideoPolicy.js` (pure, tested) owns the reconnect
+> ladder (2s→30s, 6 attempts), stall classification, HLS engine choice, clip
+> re-arm cadence, and the panel badge machine. `cctv.js` wires it with a
+> `destroyed`-flag generation guard on every async callback; `hls.js` is a
+> lazily code-split dependency loaded only when an HLS camera activates in a
+> browser without native HLS (geoid.js idiom). `config/
+> cctv_sources.dot-hls.example.json` is an unreferenced, verify-before-use
+> template for operator-supplied DOT/511 HLS packs. Tests:
+> `cctvProxy/cctvVideoPolicy/cctvHlsRewrite/cctvTflVideo/cctvSourcePacks`.
 
 > **2026-08-23 — first-run mission launcher** (`src/firstRunExperience.js`,
 > `#first-run-launcher`, styles at the tail of `style.css`). After startup
@@ -2267,6 +2373,23 @@ silently demoting every later lookup for the session.
 - CCTV proxy rejects client-specified upstream URLs (server-side source allowlist only).
 - CCTV upstream still-image fetches use an explicit abort controller with an
   eight-second timeout; the timer is cleared on every success or failure path.
+- CCTV live-media fetches (`/api/cctv/media`, `/api/cctv/hls` segments) bound
+  only the connect/header phase (ten-second abort, cleared once headers
+  arrive — an established live stream is never killed by the timer), are
+  capped at four concurrently open streams (surplus gets a sanitized 503 with
+  idempotent release on finish/close), and cancel the upstream transfer when
+  the client disconnects.
+- `/api/cctv/hls/<id>/<path>` accepts client-chosen *paths* only — resolved
+  strictly against the registered manifest's origin (explicit schemes,
+  protocol-relative jumps, backslashes, and `..` traversal rejected before
+  resolution; cross-origin results refused after). HLS playlists are rewritten
+  (never piped) with a capped 2 MB read; cross-origin URIs — bare lines and
+  `URI="…"` attributes alike — are dropped with their attached segment tags
+  rather than leaked.
+- `/api/cctv/frame` hands the still fetcher a snapshot-less source URL only
+  for genuine image feeds — video (mp4/webm/hls) AND mjpeg stream URLs are
+  refused (`frameUpstreamCandidate`), falling through to Street View /
+  synthetic instead of hanging on an unbounded body.
 - OpenSky response cache stores successful upstream responses only; OAuth token refresh calls are coalesced.
 - A cold OpenSky failure uses the current camera subpoint only to request a cached adsb.lol point fallback capped at 250 nm. A fresh OpenSky response or last-good cache wins; a nominally successful worldwide snapshot more than two minutes old prefers viewport-scoped adsb.lol when available, otherwise the stale source is reported honestly. The fallback is visibly source-labeled and is never presented as a worldwide snapshot.
 - GBFS response size is capped; CCTV health map is bounded.

@@ -3,6 +3,87 @@
 This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
+## [Unreleased] — 2026-08-26
+
+### Added
+
+- Live video for the CCTV layer, opt-in end to end. The existing (previously
+  dormant) `feedType: mp4|webm|hls` pipeline is now production-supported:
+  source packs can register live HLS/MP4 cameras (`CCTV_SOURCES_FILE`, see
+  `config/cctv_sources.dot-hls.example.json`), and `CCTV_TFL_VIDEO=1` upgrades
+  TfL JamCams from stills to their published ~10s MP4 clips (stills remain the
+  default; the still always stays the panel/frame snapshot).
+- HLS playback everywhere: the media proxy rewrites playlists so every URI
+  flows back through `/api/cctv/hls/<id>/…` (same-origin-only, traversal
+  rejected; cross-origin URIs dropped), and the client lazily code-splits
+  `hls.js` for browsers without native HLS — the chunk loads only when an HLS
+  camera is activated. Safari plays natively and never loads it.
+- Bounded reconnects for live video: a media error (or stall without buffered
+  runway) re-arms the stream on an exponential 2s→30s backoff, capped at 6
+  attempts, then falls back to the placeholder + degraded health chip.
+- A bundled **U.S. DOT & federal live-camera pack** (batches 1–10 of an
+  assisted web-research harvest; batch 3 was rejected wholesale as
+  URL-less duplicates): 249 cameras —
+  106 direct HLS streams (DelDOT 40, MoDOT 60, WisDOT 2, Nevada DOT 2,
+  Louisiana DOTD 2) that play in-app through the HLS proxy, one Oregon
+  TripCheck direct still (validation stripped a scraped template artifact
+  from its URL), 10 NPS direct-still webcams (Rocky Mountain, Olympic,
+  Crater Lake, Big Bend, Grand Canyon/Kolb Studio, Yellowstone/Mammoth —
+  live refreshing frames in-app; a stale epoch cache-buster was stripped
+  from the Big Bend URL), and 132 page-linked cameras: WSDOT I-5 ×43,
+  USGS volcano webcams ×31 (Hawaiian Volcano Observatory Kīlauea/Mauna Loa
+  + Yellowstone Volcano Observatory, public domain), Maryland CHART ×13
+  (supplied without stream URLs and downgraded from the claimed video type
+  rather than shipped broken), 511GA/AZ511/Alaska/Idaho 511/DriveNC, and
+  NPS park webcams across 14 parks (incl. Acadia, Arches, Zion, Grand
+  Teton, Wrangell-St. Elias, Glacier Bay, and the Denali Puppycam) with
+  per-camera nps.gov pages. Provider coordinates, per-entry attribution,
+  cross-pack dedupe; `CCTV_USDOT_ENABLED=0` disables.
+- Nationwide open-access camera packs: a live **NOAA NDBC BuoyCAM** loader
+  (~82 offshore cameras from NDBC's published KML, direct public-domain
+  `buoycam.php` JPEGs, station page as the live-feed link; `CCTV_NOAA_ENABLED=0`
+  disables) and an **experimental, opt-in FAA WeatherCams** loader
+  (`CCTV_FAA_ENABLED=1`; schema-defensive, origin-pinned image URLs, degrades
+  to zero cameras with a console warning on any schema surprise). The default
+  catalog cap rises 900 → 1200 (the existing hard bound) so the full built-in
+  roster never truncates; the US live-webcam pack logs its load count like the
+  city packs.
+- A bundled U.S. live-webcam directory (`config/cctv_sources.us-live.json`,
+  ~70 publicly published cameras: Ocean City MD, Corpus Christi TX, and
+  place-specific marinas/lighthouses/main-street cams across ~25 states) loads
+  as a fourth built-in CCTV pack (`CCTV_USLIVE_ENABLED=0` disables). Clicking
+  one of these cameras surfaces an **ACCESS LIVE FEED ↗** action in the CCTV
+  panel that opens the operator's own live player/portal in a new tab
+  (https-only, `noopener`); IPCamLive cameras additionally serve in-app stills
+  through the provider's snapshot endpoint via the existing frame pipeline.
+  The new `pageUrl` catalog field carrying this is validated server-side and
+  client-side and never fetched or framed by the app.
+
+### Changed
+
+- A missing `GOOGLE_MAPS_API_KEY` no longer aborts initialization. The app
+  boots into its existing keyless ladder (Cesium globe + OSM map stack,
+  keyless terrain fallback) with a console notice; Google-backed features
+  (photorealistic 3D Tiles, geocoding, Street View fallback) stay dark and
+  are individually guarded at their call sites, exactly as they already
+  were for a key that fails after boot.
+- The CCTV catalog hard bound rises 1200 → 2400 and the default cap to
+  1600, after auditing what scales with catalog size (terrain ground-prior
+  batching is chunked at 200 points, coverage geometry is lazy, billboards
+  are the only linear render cost); the proxy health map now derives from
+  the hard bound so per-camera observability keeps covering the full
+  catalog.
+- The media proxy now bounds its connect phase (10s header timeout that never
+  kills an established stream), caps concurrently open streams (4, surplus gets
+  503), and cancels the upstream transfer when the client disconnects.
+- `/api/cctv/frame` no longer hands a snapshot-less MJPEG stream URL to the
+  still-image fetcher (it would hang until the timeout); like video feeds,
+  MJPEG sources need a `snapshotUrl` for stills.
+- `.env.example`'s CCTV block now documents the source-pack gate
+  (`CCTV_FORCE_AUSTIN=1` coexistence), the new video flags, and the real
+  default caps (250 Austin / 900 overall); two flags that no longer exist
+  (`CCTV_AUTO_CALIBRATE`, `CCTV_DRAPE_MESH`) were removed from it.
+
 ## [Unreleased] — 2026-08-24
 
 ### Added

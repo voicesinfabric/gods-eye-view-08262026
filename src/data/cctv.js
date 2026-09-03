@@ -53,6 +53,14 @@ import {
 } from '../cctvFocusRequest.js';
 import { bindTrackingClickGesture, isTrackingClickGesture } from './trackingClickGesture.js';
 import {
+  clipRefreshDueAt,
+  hlsEngineFor,
+  nextRetryDelayMs,
+  shouldRetry,
+  stallIndicatesFailure,
+} from './cctvVideoPolicy.js';
+import { loadHlsJs } from './hlsLoader.js';
+import {
   clearOverlaySource,
   hitTestWorldOverlay,
   setOverlayEntries,
@@ -569,11 +577,33 @@ function normalizeFeedType(value) {
 
 /**
  * Returns true if the feed type requires a <video> element rather than an <img>.
+ *
+ * MJPEG is deliberately excluded: browsers play multipart/x-mixed-replace via
+ * <img>, not <video>, so mjpeg sources follow the image path (and the server's
+ * /frame route refuses their unbounded stream URL — snapshotUrl only).
+ *
  * @param {string} feedType
  * @returns {boolean}
  */
 function isVideoFeedType(feedType) {
   return feedType === 'mp4' || feedType === 'hls' || feedType === 'webm';
+}
+
+/**
+ * Client-side re-validation of an operator live-feed page URL (defense in
+ * depth over the server's admission rule, mirroring the radio layer's
+ * do-not-trust-our-own-server posture): https only, no embedded credentials.
+ * @param {*} value
+ * @returns {string|null}
+ */
+function safePageUrl(value) {
+  try {
+    const url = new URL(String(value ?? ''));
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1169,6 +1199,14 @@ function buildCatalogFromSources(rawSources) {
       pitchDeg,
       license: String(source.license || source.licenseNote || ''),
       poseSource,
+      // Optional finite-clip re-arm cadence (clip-rotation feeds like TfL
+      // MP4 loops); undefined = continuous stream / still, never refreshed.
+      clipRefreshSec: safeNumber(source.clipRefreshSec) > 0
+        ? safeNumber(source.clipRefreshSec)
+        : undefined,
+      // Operator live-feed page for the panel's ACCESS LIVE FEED action
+      // (opened in a new tab by the UI; never fetched by the app).
+      pageUrl: safePageUrl(source.pageUrl),
     };
     ensureCameraPose(camera);
     catalog.push(camera);
@@ -1707,6 +1745,18 @@ function createProjectionRuntime(record) {
     // only re-uploads the plane texture when there is genuinely new content.
     canvasStamp: 1,
     lastSwappedCanvasStamp: 0,
+    // Live-video recovery state (cctvVideoPolicy drives the decisions):
+    // bounded reconnect ladder, optional finite-clip re-arm, and the lazily
+    // attached hls.js engine. destroyed flips in destroyProjectionRuntime so
+    // async callbacks (retry timers, the hls.js dynamic import) can never
+    // re-arm a torn-down runtime.
+    destroyed: false,
+    videoRetryAttempts: 0,
+    videoRetryTimer: null,
+    clipRefreshTimer: null,
+    srcSetAt: 0,
+    hls: null,
+    hlsLoadToken: 0,
   };
 
   paintProjectionPlaceholder(ctx, record.camera);
@@ -1719,11 +1769,13 @@ function createProjectionRuntime(record) {
     video.playsInline = true;
     video.crossOrigin = 'anonymous';
     video.preload = 'auto';
-    video.src = mediaUrlFor(record.camera);
     video.addEventListener('canplay', () => {
       video.play().catch(() => {});
     });
     runtime.video = video;
+    attachVideoSource(record, runtime, video);
+    wireVideoRecovery(record, runtime, video);
+    scheduleClipRefresh(record, runtime, video);
   } else {
     const img = new Image();
     img.decoding = 'async';
@@ -1757,6 +1809,120 @@ function createProjectionRuntime(record) {
   return runtime;
 }
 
+/** True while this runtime is still the record's live projection and owns
+ * this video element — every async video callback re-checks this before
+ * touching anything. */
+function projectionVideoIsCurrent(record, runtime, video) {
+  return !runtime.destroyed && record.projection === runtime && runtime.video === video;
+}
+
+/**
+ * Point the projection video element at its proxied media source.
+ *
+ * mp4/webm (and native-HLS browsers) set src directly; other browsers get the
+ * lazily imported hls.js MSE engine attached. retryTag > 0 marks a reconnect:
+ * the URL gains a &retry= marker (so a re-arm inside the same 15s ts bucket
+ * still issues a fresh proxy request) and the element is re-loaded/re-played.
+ * The hlsLoadToken guards the dynamic-import gap — teardown or a newer attach
+ * invalidates a stale load before it touches the element.
+ */
+function attachVideoSource(record, runtime, video, { retryTag = 0 } = {}) {
+  const feedType = normalizeFeedType(record.camera.feedType);
+  const src = retryTag > 0
+    ? `${mediaUrlFor(record.camera)}&retry=${retryTag}`
+    : mediaUrlFor(record.camera);
+  runtime.srcSetAt = Date.now();
+
+  const attachDirect = () => {
+    video.src = src;
+    if (retryTag > 0) {
+      video.load();
+      video.play().catch(() => {});
+    }
+  };
+
+  if (feedType !== 'hls') {
+    attachDirect();
+    return;
+  }
+  if (hlsEngineFor(video.canPlayType('application/vnd.apple.mpegurl')) === 'native') {
+    attachDirect();
+    return;
+  }
+
+  const token = ++runtime.hlsLoadToken;
+  loadHlsJs()
+    .then((Hls) => {
+      if (!projectionVideoIsCurrent(record, runtime, video)) return;
+      if (token !== runtime.hlsLoadToken) return;
+      if (!Hls || typeof Hls.isSupported !== 'function' || !Hls.isSupported()) {
+        attachDirect(); // no MSE either — a native attempt beats a black plane
+        return;
+      }
+      if (runtime.hls) {
+        try { runtime.hls.destroy(); } catch { /* no-op */ }
+      }
+      const hls = new Hls();
+      runtime.hls = hls;
+      hls.loadSource(src);
+      hls.attachMedia(video);
+    })
+    .catch(() => {
+      if (!projectionVideoIsCurrent(record, runtime, video)) return;
+      if (token !== runtime.hlsLoadToken) return;
+      attachDirect(); // dynamic-import failure: same native fallback
+    });
+}
+
+/**
+ * Bounded reconnect for direct-src video (hls.js runtimes are skipped — the
+ * engine owns its own retry ladder). A media error, or a stall with no
+ * buffered runway, re-arms the same element on the cctvVideoPolicy backoff;
+ * 'playing' resets the ladder; after max attempts the placeholder canvas and
+ * the degraded health chip take over (existing behavior).
+ */
+function wireVideoRecovery(record, runtime, video) {
+  const scheduleRetry = () => {
+    if (!projectionVideoIsCurrent(record, runtime, video)) return;
+    if (runtime.hls || runtime.videoRetryTimer) return;
+    runtime.videoRetryAttempts += 1;
+    if (!shouldRetry(runtime.videoRetryAttempts)) return;
+    runtime.videoRetryTimer = setTimeout(() => {
+      runtime.videoRetryTimer = null;
+      if (!projectionVideoIsCurrent(record, runtime, video) || runtime.hls) return;
+      attachVideoSource(record, runtime, video, { retryTag: runtime.videoRetryAttempts });
+    }, nextRetryDelayMs(runtime.videoRetryAttempts));
+  };
+  video.addEventListener('error', scheduleRetry);
+  video.addEventListener('stalled', () => {
+    if (stallIndicatesFailure(video.readyState)) scheduleRetry();
+  });
+  video.addEventListener('playing', () => {
+    if (!projectionVideoIsCurrent(record, runtime, video)) return;
+    runtime.videoRetryAttempts = 0;
+  });
+}
+
+/**
+ * Finite-clip re-arm (e.g. TfL JamCam ~10s MP4 loops): sources that declare
+ * clipRefreshSec get their src re-set on that cadence so the loop tracks the
+ * provider's clip rotation. Continuous streams and packs without the field
+ * never schedule anything (clipRefreshDueAt returns null).
+ */
+function scheduleClipRefresh(record, runtime, video) {
+  const dueAt = clipRefreshDueAt(runtime.srcSetAt, record.camera.clipRefreshSec);
+  if (dueAt == null) return;
+  const delay = Math.max(1000, dueAt - Date.now());
+  runtime.clipRefreshTimer = setTimeout(() => {
+    runtime.clipRefreshTimer = null;
+    if (!projectionVideoIsCurrent(record, runtime, video)) return;
+    attachVideoSource(record, runtime, video);
+    video.load();
+    video.play().catch(() => {});
+    scheduleClipRefresh(record, runtime, video);
+  }, delay);
+}
+
 /**
  * Lazily initializes the projection runtime for a record if it doesn't exist yet.
  * @param {Object} record - Camera record.
@@ -1780,6 +1946,22 @@ function ensureProjectionRuntime(record) {
  */
 function destroyProjectionRuntime(runtime) {
   if (!runtime) return;
+  // Flip the guard FIRST: any pending retry timer, clip-refresh timer, or
+  // in-flight hls.js import bails out via projectionVideoIsCurrent.
+  runtime.destroyed = true;
+  if (runtime.videoRetryTimer) {
+    clearTimeout(runtime.videoRetryTimer);
+    runtime.videoRetryTimer = null;
+  }
+  if (runtime.clipRefreshTimer) {
+    clearTimeout(runtime.clipRefreshTimer);
+    runtime.clipRefreshTimer = null;
+  }
+  runtime.hlsLoadToken += 1;
+  if (runtime.hls) {
+    try { runtime.hls.destroy(); } catch { /* no-op */ }
+    runtime.hls = null;
+  }
   if (runtime.video) {
     runtime.video.pause();
     runtime.video.removeAttribute('src');
@@ -3434,6 +3616,7 @@ function getPublicCameraState(record, activeId = null) {
     basePose: camera.basePose ? { ...camera.basePose } : null,
     frameUrl: frameUrlFor(camera, refreshMs),
     mediaUrl: mediaUrlFor(camera),
+    pageUrl: camera.pageUrl || null,
   };
 }
 

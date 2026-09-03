@@ -62,6 +62,8 @@ import militaryFlightsLayer from './data/militaryFlights.js';
 import { isTr3b, toggleTr3b } from './data/tr3bRegistry.js';
 import satellitesLayer from './data/satellites.js';
 import cctvLayer from './data/cctv.js';
+import { hlsEngineFor, isVideoFeed, panelMediaBadgeState } from './data/cctvVideoPolicy.js';
+import { loadHlsJs } from './data/hlsLoader.js';
 import radioLayer, {
   buildRadioTunerTicks,
   radioTunerCommitSlot,
@@ -2348,7 +2350,23 @@ export class StyleManager {
     this._cctvFrameWrap = document.getElementById('cctv-frame-wrap');
     this._cctvFrameRequestToken = 0;
     this._cctvFramePreloader = null;
+    this._cctvVideo = document.getElementById('cctv-video');
+    this._cctvVideoToken = 0;
+    this._cctvPanelHls = null;
+    // Playback-state changes must refresh the LIVE badge immediately — the
+    // panel state tick alone would lag them by up to 10s.
+    this._onCctvVideoStateChange = () => this._syncCctvSourceBadge(
+      this._cctvState?.activeCamera,
+      !!this._cctvState?.enabled && !!this._dataManager?.isEnabled('cctv')
+    );
+    if (this._cctvVideo) {
+      this._cctvVideo.addEventListener('playing', this._onCctvVideoStateChange);
+      this._cctvVideo.addEventListener('pause', this._onCctvVideoStateChange);
+      this._cctvVideo.addEventListener('waiting', this._onCctvVideoStateChange);
+      this._cctvVideo.addEventListener('error', this._onCctvVideoStateChange);
+    }
     this._cctvSourceBadge = document.getElementById('cctv-source-badge');
+    this._cctvLiveLink = document.getElementById('cctv-live-link');
     this._cctvMeta = document.getElementById('cctv-meta');
     this._cctvSummary = document.getElementById('cctv-summary');
     this._shareBtn = document.getElementById('share-btn');
@@ -6320,8 +6338,86 @@ export class StyleManager {
   }
 
   /**
+   * Attaches the panel <video> to the active video-feed camera. Idempotent per
+   * camera: a state tick with the same camera only refreshes the badge. HLS in
+   * browsers without native support goes through the shared lazily-loaded
+   * hls.js engine; the token invalidates a stale async attach after a camera
+   * change or teardown.
+   * @param {object} activeCamera - Published camera with mediaUrl + feedType.
+   * @returns {void}
+   */
+  _syncCctvPanelVideo(activeCamera) {
+    const video = this._cctvVideo;
+    if (!video) return;
+    const cameraId = String(activeCamera.id || '');
+    if (video.dataset.attached === 'true' && video.dataset.cameraId === cameraId) {
+      this._syncCctvSourceBadge(activeCamera, true);
+      return;
+    }
+    this._teardownCctvPanelVideo();
+    // The still element yields the wrap; honest acquisition state, like
+    // _queueCctvFrame's camera-change path.
+    this._clearCctvFrame();
+    video.dataset.attached = 'true';
+    video.dataset.cameraId = cameraId;
+    this._cctvFrameWrap?.classList.add('has-video');
+
+    const src = String(activeCamera.mediaUrl || '');
+    const token = ++this._cctvVideoToken;
+    const needsHlsJs = String(activeCamera.feedType || '').toLowerCase() === 'hls'
+      && hlsEngineFor(video.canPlayType('application/vnd.apple.mpegurl')) === 'hlsjs';
+    if (!needsHlsJs) {
+      video.src = src;
+      video.play?.().catch(() => {});
+    } else {
+      loadHlsJs()
+        .then((Hls) => {
+          if (token !== this._cctvVideoToken) return;
+          if (!Hls || typeof Hls.isSupported !== 'function' || !Hls.isSupported()) {
+            video.src = src; // no MSE either — a native attempt beats nothing
+            return;
+          }
+          const hls = new Hls();
+          this._cctvPanelHls = hls;
+          hls.loadSource(src);
+          hls.attachMedia(video);
+        })
+        .catch(() => {
+          if (token !== this._cctvVideoToken) return;
+          video.src = src;
+        });
+    }
+    this._syncCctvSourceBadge(activeCamera, true);
+  }
+
+  /**
+   * Stops and detaches the panel <video>, returning the wrap to the still
+   * <img>. Safe to call when nothing is attached.
+   * @returns {void}
+   */
+  _teardownCctvPanelVideo() {
+    const video = this._cctvVideo;
+    if (!video) return;
+    this._cctvVideoToken += 1;
+    if (this._cctvPanelHls) {
+      try { this._cctvPanelHls.destroy(); } catch { /* no-op */ }
+      this._cctvPanelHls = null;
+    }
+    if (video.dataset.attached === 'true') {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    }
+    video.dataset.attached = '';
+    video.dataset.cameraId = '';
+    this._cctvFrameWrap?.classList.remove('has-video');
+  }
+
+  /**
    * Keeps the source badge truthful about the visible frame lifecycle. Health
    * may already be OK while the browser is still decoding the requested image.
+   * When the panel video owns the preview, the badge runs the live-video state
+   * machine (cctvVideoPolicy) instead of the still-frame one.
    * @param {object|null} activeCamera
    * @param {boolean} enabled
    * @returns {void}
@@ -6331,6 +6427,27 @@ export class StyleManager {
     if (!enabled || !activeCamera) {
       this._cctvSourceBadge.textContent = 'SOURCE · UNKNOWN';
       this._cctvSourceBadge.dataset.frameState = 'idle';
+      return;
+    }
+    const video = this._cctvVideo;
+    if (video && video.dataset.attached === 'true'
+      && this._cctvFrameWrap?.classList.contains('has-video')) {
+      const badgeState = panelMediaBadgeState({
+        isVideo: true,
+        playing: !video.paused && video.readyState >= 2,
+        degraded: String(activeCamera.sourceStatus || '').toLowerCase() === 'degraded',
+      });
+      const provider = String(activeCamera.sourceLabel || activeCamera.provider || 'STREAM').toUpperCase();
+      if (badgeState === 'live') {
+        this._cctvSourceBadge.textContent = `LIVE · ${provider}`;
+        this._cctvSourceBadge.dataset.frameState = 'live';
+      } else if (badgeState === 'degraded') {
+        this._cctvSourceBadge.textContent = 'LIVE · DEGRADED';
+        this._cctvSourceBadge.dataset.frameState = 'error';
+      } else {
+        this._cctvSourceBadge.textContent = 'LIVE · CONNECTING';
+        this._cctvSourceBadge.dataset.frameState = 'loading';
+      }
       return;
     }
     const hasDisplayedFrame = this._cctvFrameWrap?.classList.contains('has-frame');
@@ -6620,20 +6737,47 @@ export class StyleManager {
       }
     }
 
-    if (this._cctvFrame) {
-      const nextSrc = enabled ? activeCamera?.frameUrl : null;
-      const nextCameraId = enabled ? (activeCamera?.id || '') : '';
-      const cameraChanged = this._cctvFrame.dataset.cameraId !== nextCameraId;
-      const frameLoading = this._cctvFrame.dataset.loading === 'true';
-      // A same-camera refresh waits for the current image to settle. Replacing
-      // src every 10 seconds can cancel a slow but healthy decode forever and
-      // leave SNAPSHOT · OK beside a blank/loading preview. Camera changes are
-      // immediate so navigation never waits on the prior camera's request.
-      if (nextSrc && (cameraChanged || (!frameLoading && this._cctvFrame.dataset.currentSrc !== nextSrc))) {
-        this._queueCctvFrame(nextSrc, nextCameraId, cameraChanged);
+    // A video-feed active camera takes over the preview with the live <video>
+    // player; every other case is the untouched still-image path.
+    const panelVideoCamera = enabled && activeCamera?.mediaUrl && isVideoFeed(activeCamera?.feedType)
+      ? activeCamera
+      : null;
+    if (panelVideoCamera) {
+      this._syncCctvPanelVideo(panelVideoCamera);
+    } else {
+      this._teardownCctvPanelVideo();
+      if (this._cctvFrame) {
+        const nextSrc = enabled ? activeCamera?.frameUrl : null;
+        const nextCameraId = enabled ? (activeCamera?.id || '') : '';
+        const cameraChanged = this._cctvFrame.dataset.cameraId !== nextCameraId;
+        const frameLoading = this._cctvFrame.dataset.loading === 'true';
+        // A same-camera refresh waits for the current image to settle. Replacing
+        // src every 10 seconds can cancel a slow but healthy decode forever and
+        // leave SNAPSHOT · OK beside a blank/loading preview. Camera changes are
+        // immediate so navigation never waits on the prior camera's request.
+        if (nextSrc && (cameraChanged || (!frameLoading && this._cctvFrame.dataset.currentSrc !== nextSrc))) {
+          this._queueCctvFrame(nextSrc, nextCameraId, cameraChanged);
+        }
+        if (!nextSrc) {
+          this._clearCctvFrame();
+        }
       }
-      if (!nextSrc) {
-        this._clearCctvFrame();
+    }
+
+    // ACCESS LIVE FEED: cameras whose operator publishes a live player/page
+    // expose it as a new-tab action. Final https guard here even though the
+    // server and catalog already validated — an href is a navigation sink.
+    if (this._cctvLiveLink) {
+      const pageUrl = enabled && typeof activeCamera?.pageUrl === 'string'
+        && activeCamera.pageUrl.startsWith('https://')
+        ? activeCamera.pageUrl
+        : '';
+      if (pageUrl) {
+        this._cctvLiveLink.href = pageUrl;
+        this._cctvLiveLink.hidden = false;
+      } else {
+        this._cctvLiveLink.removeAttribute('href');
+        this._cctvLiveLink.hidden = true;
       }
     }
 
@@ -10143,6 +10287,14 @@ export class StyleManager {
     this._removeCctvRequestFocusListener?.();
     this._removeCctvRequestFocusListener = null;
     this._cctvRequestFocusHandler = null;
+    this._teardownCctvPanelVideo();
+    if (this._cctvVideo && this._onCctvVideoStateChange) {
+      this._cctvVideo.removeEventListener('playing', this._onCctvVideoStateChange);
+      this._cctvVideo.removeEventListener('pause', this._onCctvVideoStateChange);
+      this._cctvVideo.removeEventListener('waiting', this._onCctvVideoStateChange);
+      this._cctvVideo.removeEventListener('error', this._onCctvVideoStateChange);
+      this._onCctvVideoStateChange = null;
+    }
     this._removeWorldRequestFocusListener?.();
     this._removeWorldRequestFocusListener = null;
     this._worldRequestFocusHandler = null;
